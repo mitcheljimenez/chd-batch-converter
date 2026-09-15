@@ -12,17 +12,31 @@ const cancelBtn = document.getElementById("cancel-btn");
 const progressFill = document.getElementById("progress-bar-fill");
 const discTable = document.getElementById("disc-table");
 
+function mk(cls, text) {
+  const s = document.createElement("span");
+  s.className = cls;
+  s.textContent = text ?? "";
+  return s;
+}
+
 function renderTable() {
   discTable.innerHTML = "";
   for (const disc of discs) {
     const row = document.createElement("div");
     row.className = "disc-row";
     const icon = { pending: "•", ok: "✅", skip: "⏭️", fail: "❌" }[disc.status];
-    row.innerHTML = `
-      <span class="disc-status-icon status-${disc.status}">${icon}</span>
-      <span class="disc-name">${disc.name}</span>
-      <span class="disc-message">${disc.message ?? ""}</span>
-    `;
+    row.innerHTML = "";
+    row.append(
+      // disc.status is backend-controlled (not a filesystem/user value), so
+      // it's safe in the className, but disc.name and disc.message come
+      // from real filenames and the .bat's log text — build them via
+      // textContent, never innerHTML, so HTML-like characters in a
+      // filename (e.g. "<img src=x onerror=...>.cue") render as literal
+      // text instead of executing as markup.
+      mk(`disc-status-icon status-${disc.status}`, icon),
+      mk("disc-name", disc.name),
+      mk("disc-message", disc.message ?? "")
+    );
     discTable.appendChild(row);
   }
 }
