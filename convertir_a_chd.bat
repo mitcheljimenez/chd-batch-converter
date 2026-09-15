@@ -1,7 +1,14 @@
 @echo off
 setlocal
 
-set "ROOT=%~dp0"
+if not "%~1"=="" (
+    set "ROOT=%~1"
+    if not "%ROOT:~-1%"=="\" (
+        set "ROOT=%ROOT%\"
+    )
+) else (
+    set "ROOT=%~dp0"
+)
 rem Test-only hook: tests/run_scenario.sh points this at tests/mock_chdman.bat
 rem so the suite can run without a real chdman.exe.
 if defined CHDMAN_OVERRIDE (
