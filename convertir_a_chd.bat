@@ -59,7 +59,15 @@ if errorlevel 1 (
     goto :eof
 )
 
-call :log "OK    | %SRC% | convertido"
+call "%CHDMAN%" verify -i "%OUT%" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log "FAIL  | %SRC% | convertido pero VERIFY FALLO"
+    endlocal
+    set /a COUNT_FAILED+=1
+    goto :eof
+)
+
+call :log "OK    | %SRC% | convertido y verificado"
 endlocal
 set /a COUNT_CONVERTED+=1
 goto :eof
