@@ -94,3 +94,33 @@ button.secondary { background: var(--surface-hover); }
 .status-fail { color: var(--fail); }
 .status-skip { color: var(--skip); }
 .status-pending { color: var(--text-dim); }
+
+.panel {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel label { color: var(--text-dim); font-size: 13px; }
+
+.panel input {
+  background: var(--bg);
+  border: 1px solid var(--surface-hover);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.history-row {
+  display: flex;
+  gap: 12px;
+  padding: 8px;
+  border-bottom: 1px solid var(--surface-hover);
+  font-size: 13px;
+}
+
+.history-row .history-folder { flex: 1; color: var(--text-dim); }

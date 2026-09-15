@@ -109,3 +109,45 @@ listen("run-finished", () => {
   convertBtn.style.display = "inline-block";
   cancelBtn.style.display = "none";
 });
+
+const settingsBtn = document.getElementById("settings-btn");
+const settingsPanel = document.getElementById("settings-panel");
+const chdmanPathInput = document.getElementById("chdman-path-input");
+const saveSettingsBtn = document.getElementById("save-settings-btn");
+const historyBtn = document.getElementById("history-btn");
+const historyPanel = document.getElementById("history-panel");
+
+settingsBtn.addEventListener("click", async () => {
+  historyPanel.style.display = "none";
+  const isHidden = settingsPanel.style.display === "none";
+  if (isHidden) {
+    const config = await invoke("get_config");
+    chdmanPathInput.value = config.chdman_path;
+  }
+  settingsPanel.style.display = isHidden ? "flex" : "none";
+});
+
+saveSettingsBtn.addEventListener("click", async () => {
+  await invoke("set_config", { chdmanPath: chdmanPathInput.value });
+  settingsPanel.style.display = "none";
+});
+
+historyBtn.addEventListener("click", async () => {
+  settingsPanel.style.display = "none";
+  const isHidden = historyPanel.style.display === "none";
+  if (isHidden) {
+    const history = await invoke("get_history");
+    historyPanel.innerHTML = "";
+    for (const run of history.slice().reverse()) {
+      const date = new Date(Number(run.timestamp) * 1000).toLocaleString();
+      const status = run.cancelled
+        ? "Cancelado"
+        : `${run.converted} convertidos, ${run.skipped} saltados, ${run.failed} fallidos`;
+      const row = document.createElement("div");
+      row.className = "history-row";
+      row.append(mk("history-folder", run.folder), mk("", date), mk("", status));
+      historyPanel.appendChild(row);
+    }
+  }
+  historyPanel.style.display = isHidden ? "flex" : "none";
+});
