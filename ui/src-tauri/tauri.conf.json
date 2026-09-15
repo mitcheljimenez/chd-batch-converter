@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "chd-converter-ui",
+  "productName": "CHD Converter",
   "version": "0.1.0",
   "identifier": "com.mitch.chd-converter-ui",
   "build": {
@@ -11,8 +11,8 @@
     "windows": [
       {
         "title": "CHD Converter",
-        "width": 800,
-        "height": 600
+        "width": 900,
+        "height": 640
       }
     ],
     "security": {
