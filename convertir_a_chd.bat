@@ -25,6 +25,14 @@ for /r "%ROOT%" %%F in (*.cue) do (
     call :process_disc "%%~fF" "%%~dpF" "%%~nF" createcd
 )
 
+for /r "%ROOT%" %%F in (*.iso) do (
+    set "HASCUE="
+    for %%C in ("%%~dpF*.cue") do set "HASCUE=1"
+    if not defined HASCUE (
+        call :process_disc "%%~fF" "%%~dpF" "%%~nF" createdvd
+    )
+)
+
 call :log "==== Resumen: Convertidos=!COUNT_CONVERTED! Saltados=!COUNT_SKIPPED! Fallidos=!COUNT_FAILED! ===="
 echo.
 echo Listo. Convertidos=!COUNT_CONVERTED!  Saltados=!COUNT_SKIPPED!  Fallidos=!COUNT_FAILED!
