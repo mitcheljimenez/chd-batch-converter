@@ -81,25 +81,27 @@ fn start_conversion(
     root: String,
     state: tauri::State<RunState>,
 ) -> Result<(), String> {
-    // Reset the cancelled flag before anything else (including the
-    // chdman-path check and spawning). If this happened after spawning, a
-    // cancel_conversion racing in between the spawn and the reset could set
-    // the flag true and kill the process, only for this store(false) to
-    // immediately clobber it back to false — recording a genuinely
-    // cancelled run as cancelled: false.
-    state.1.store(false, Ordering::SeqCst);
-
-    // Reject a second run while one is already in flight. Two rapid clicks can
-    // fire start_conversion twice inside one IPC round-trip; the second run's
-    // log-file deletion below would truncate the first tailer's view, and
-    // state.0 would only remember the second Child — orphaning the first
-    // process with no UI way to cancel it.
+    // Reject a second run while one is already in flight, BEFORE touching the
+    // cancelled flag below. Two rapid clicks can fire start_conversion twice
+    // inside one IPC round-trip; the second run's log-file deletion below
+    // would truncate the first tailer's view, and state.0 would only
+    // remember the second Child — orphaning the first process with no UI way
+    // to cancel it. Checking this first also avoids clobbering the flag (see
+    // next comment) for a call that's about to bail out anyway.
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         if guard.is_some() {
             return Err("Ya hay una conversión en curso".to_string());
         }
     }
+
+    // Reset the cancelled flag before anything else that follows (including
+    // the chdman-path check and spawning). If this happened after spawning, a
+    // cancel_conversion racing in between the spawn and the reset could set
+    // the flag true and kill the process, only for this store(false) to
+    // immediately clobber it back to false — recording a genuinely
+    // cancelled run as cancelled: false.
+    state.1.store(false, Ordering::SeqCst);
 
     let app_dir = resolve_app_config_dir(&app_handle)?;
     let config = load_config(&app_dir);

@@ -12,8 +12,10 @@ npm run tauri build
 
 The finished `.exe` is at `ui/src-tauri/target/release/chd-converter-ui.exe` (or
 similar, per `tauri.conf.json`'s `productName`). It bundles `convertir_a_chd.bat`
-alongside itself at build time (see Task 6) — copy `chdman.exe` next to the
-`.exe` (or set its path in the app's Settings panel) before running conversions.
+and a fallback `chdman.exe` alongside itself at build time, so it works out of
+the box — set a different path in the app's Settings panel if you want to use
+your own `chdman.exe` instead. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
+for the bundled `chdman.exe`'s license.
 
 ## Usage
 
