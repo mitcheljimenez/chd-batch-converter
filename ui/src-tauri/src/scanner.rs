@@ -1,0 +1,95 @@
+use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
+
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+pub struct ScannedDisc {
+    pub name: String,
+    pub folder: String,
+    pub kind: String,
+}
+
+pub fn scan_folder(root: &Path) -> Vec<ScannedDisc> {
+    let mut cues: Vec<PathBuf> = Vec::new();
+    let mut isos: Vec<PathBuf> = Vec::new();
+
+    for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path().to_path_buf();
+        match path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) {
+            Some(ext) if ext == "cue" => cues.push(path),
+            Some(ext) if ext == "iso" => isos.push(path),
+            _ => {}
+        }
+    }
+
+    let mut results: Vec<ScannedDisc> = cues
+        .iter()
+        .map(|p| ScannedDisc {
+            name: p.file_name().unwrap().to_string_lossy().to_string(),
+            folder: p.parent().unwrap().to_string_lossy().to_string(),
+            kind: "cue".to_string(),
+        })
+        .collect();
+
+    for iso in &isos {
+        let dir = iso.parent().unwrap();
+        let has_cue = cues.iter().any(|c| c.parent().unwrap() == dir);
+        if !has_cue {
+            results.push(ScannedDisc {
+                name: iso.file_name().unwrap().to_string_lossy().to_string(),
+                folder: dir.to_string_lossy().to_string(),
+                kind: "iso".to_string(),
+            });
+        }
+    }
+
+    results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn write(path: &Path, content: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn finds_cue_and_bare_iso_but_skips_iso_next_to_cue() {
+        let dir = std::env::temp_dir().join(format!("chd_scanner_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        write(&dir.join("GameA/Track.cue"), "FILE \"Track.bin\" BINARY\n");
+        write(&dir.join("GameB/Disc.iso"), "fake iso");
+        write(&dir.join("GameC/Disc.iso"), "fake iso");
+        write(&dir.join("GameC/Other.cue"), "FILE \"Other.bin\" BINARY\n");
+
+        let mut results = scan_folder(&dir);
+        results.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(results.len(), 3, "GameC's Disc.iso must be excluded: {:?}", results);
+        assert_eq!(results[0].name, "Disc.iso");
+        assert_eq!(results[0].kind, "iso");
+        assert_eq!(results[1].name, "Other.cue");
+        assert_eq!(results[1].kind, "cue");
+        assert_eq!(results[2].name, "Track.cue");
+        assert_eq!(results[2].kind, "cue");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_folder_yields_no_discs() {
+        let dir = std::env::temp_dir().join(format!("chd_scanner_empty_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        assert_eq!(scan_folder(&dir), Vec::new());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}
