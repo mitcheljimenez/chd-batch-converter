@@ -30,7 +30,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "build-assets/convertir_a_chd.bat"
+      "build-assets/convertir_a_chd.bat",
+      "build-assets/chdman.exe"
     ]
   }
 }

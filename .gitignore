@@ -1,5 +1,8 @@
 .superpowers/
 chdman.exe
+# ...except the copy bundled as a Tauri resource, which is the runtime
+# fallback when no chdman path is configured and must ship with the repo.
+!ui/src-tauri/build-assets/chdman.exe
 tests/fixtures/**/*.chd
 !tests/fixtures/cue_skip/game/Track.chd
 !tests/fixtures/nested_multidisc/Sub/GameB/Track.chd

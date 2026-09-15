@@ -24,8 +24,9 @@ function renderTable() {
   for (const disc of discs) {
     const row = document.createElement("div");
     row.className = "disc-row";
-    const icon = { pending: "•", ok: "✅", skip: "⏭️", fail: "❌" }[disc.status];
-    row.innerHTML = "";
+    // "cancel" is a frontend-only status: the backend never emits it, it's
+    // applied locally to discs left pending when a run ends cancelled.
+    const icon = { pending: "•", ok: "✅", skip: "⏭️", fail: "❌", cancel: "⏹️" }[disc.status];
     row.append(
       // disc.status is backend-controlled (not a filesystem/user value), so
       // it's safe in the className, but disc.name and disc.message come
@@ -62,11 +63,19 @@ pickFolderBtn.addEventListener("click", async () => {
 });
 
 convertBtn.addEventListener("click", async () => {
+  // Disable synchronously, BEFORE the await: hiding the button only after
+  // start_conversion resolves leaves a window in which a fast double-click
+  // fires two IPC calls, which the backend then rejects with "Ya hay una
+  // conversión en curso".
+  convertBtn.disabled = true;
   try {
     await invoke("start_conversion", { root: currentFolder });
     convertBtn.style.display = "none";
     cancelBtn.style.display = "inline-block";
   } catch (err) {
+    // A real failure (bad chdman path, spawn error) must not lock the button
+    // forever — re-enable so the user can fix the setting and retry.
+    convertBtn.disabled = false;
     alert(`No se pudo iniciar la conversion: ${err}`);
   }
 });
@@ -105,8 +114,19 @@ listen("disc-updated", (event) => {
   }
 });
 
-listen("run-finished", () => {
+listen("run-finished", (event) => {
+  // A cancelled run leaves discs that were never reached stuck on the pending
+  // "•" forever, which reads as "still working". Mark them as cancelled.
+  if (event?.payload?.cancelled) {
+    for (const disc of discs) {
+      if (disc.status === "pending") disc.status = "cancel";
+    }
+    renderTable();
+    updateProgress();
+  }
   convertBtn.style.display = "inline-block";
+  // Re-enable: the click handler disabled it synchronously at run start.
+  convertBtn.disabled = discs.length === 0;
   cancelBtn.style.display = "none";
 });
 

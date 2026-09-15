@@ -1,4 +1,4 @@
-mod log_tail;
+pub mod log_tail;
 mod scanner;
 mod settings;
 
@@ -13,7 +13,12 @@ use log_tail::{parse_log_line, LogTailer};
 use scanner::scan_folder;
 use settings::{append_history, load_config, load_history, save_config, Config, RunRecord};
 
-struct RunState(Mutex<Option<Child>>, Arc<AtomicBool>);
+/// The running child (if any) and the "user pressed cancel" flag. Both halves
+/// are `Arc`-wrapped so the background tail thread can share them with the
+/// command handlers — in particular so the thread can clear the child slot on
+/// its own exit path instead of leaving a stale `Child` behind (whose PID
+/// could later be reused by an unrelated process and killed by a cancel).
+struct RunState(Arc<Mutex<Option<Child>>>, Arc<AtomicBool>);
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -84,10 +89,41 @@ fn start_conversion(
     // cancelled run as cancelled: false.
     state.1.store(false, Ordering::SeqCst);
 
+    // Reject a second run while one is already in flight. Two rapid clicks can
+    // fire start_conversion twice inside one IPC round-trip; the second run's
+    // log-file deletion below would truncate the first tailer's view, and
+    // state.0 would only remember the second Child — orphaning the first
+    // process with no UI way to cancel it.
+    {
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            return Err("Ya hay una conversión en curso".to_string());
+        }
+    }
+
     let app_dir = resolve_app_config_dir(&app_handle)?;
     let config = load_config(&app_dir);
-    if config.chdman_path.is_empty() {
-        return Err("chdman.exe path not configured".to_string());
+
+    // Pre-run guards (spec): the configured path must exist, and an unset path
+    // falls back to a chdman.exe bundled next to convertir_a_chd.bat.
+    let chdman_path = if config.chdman_path.is_empty() {
+        let fallback = app_handle
+            .path()
+            .resolve("build-assets/chdman.exe", tauri::path::BaseDirectory::Resource)
+            .map_err(|_| "chdman.exe path not configured".to_string())?;
+        if !fallback.exists() {
+            return Err("chdman.exe path not configured".to_string());
+        }
+        fallback.to_string_lossy().to_string()
+    } else {
+        config.chdman_path.clone()
+    };
+
+    if !std::path::Path::new(&chdman_path).exists() {
+        return Err(format!(
+            "chdman.exe no encontrado en la ruta configurada: {}",
+            chdman_path
+        ));
     }
 
     let script_path = app_handle
@@ -100,7 +136,7 @@ fn start_conversion(
 
     let mut cmd = Command::new(&script_path);
     cmd.arg(&root)
-        .env("CHDMAN_OVERRIDE", &config.chdman_path)
+        .env("CHDMAN_OVERRIDE", &chdman_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -110,6 +146,7 @@ fn start_conversion(
     *state.0.lock().map_err(|e| e.to_string())? = Some(child);
 
     let cancelled_flag = state.1.clone();
+    let child_slot = state.0.clone();
     let root_for_thread = root.clone();
 
     thread::spawn(move || {
@@ -163,6 +200,14 @@ fn start_conversion(
                         }
                     }
                 }
+                // The process is gone: clear the shared slot so a later
+                // cancel_conversion can't taskkill a stale PID that Windows
+                // may since have recycled onto an unrelated process. Only on
+                // this exit path — while the loop is still polling, the slot
+                // must keep the live Child so cancel can reach it.
+                if let Ok(mut guard) = child_slot.lock() {
+                    *guard = None;
+                }
                 break;
             }
 
@@ -195,7 +240,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(RunState(Mutex::new(None), Arc::new(AtomicBool::new(false))))
+        .manage(RunState(
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicBool::new(false)),
+        ))
         .invoke_handler(tauri::generate_handler![
             greet,
             prescan,
