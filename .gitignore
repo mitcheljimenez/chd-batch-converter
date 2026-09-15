@@ -1,1 +1,4 @@
 .superpowers/
+chdman.exe
+tests/fixtures/**/*.chd
+tests/fixtures/**/conversion_log.txt
