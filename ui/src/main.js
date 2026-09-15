@@ -1,18 +1,97 @@
 const { invoke } = window.__TAURI__.core;
+const { open } = window.__TAURI__.dialog;
+const { listen } = window.__TAURI__.event;
 
-let greetInputEl;
-let greetMsgEl;
+let currentFolder = null;
+let discs = []; // [{ name, folder, kind, status: "pending"|"ok"|"skip"|"fail", message: "" }]
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsgEl.textContent = await invoke("greet", { name: greetInputEl.value });
+const pickFolderBtn = document.getElementById("pick-folder-btn");
+const folderLabel = document.getElementById("folder-label");
+const convertBtn = document.getElementById("convert-btn");
+const cancelBtn = document.getElementById("cancel-btn");
+const progressFill = document.getElementById("progress-bar-fill");
+const discTable = document.getElementById("disc-table");
+
+function renderTable() {
+  discTable.innerHTML = "";
+  for (const disc of discs) {
+    const row = document.createElement("div");
+    row.className = "disc-row";
+    const icon = { pending: "•", ok: "✅", skip: "⏭️", fail: "❌" }[disc.status];
+    row.innerHTML = `
+      <span class="disc-status-icon status-${disc.status}">${icon}</span>
+      <span class="disc-name">${disc.name}</span>
+      <span class="disc-message">${disc.message ?? ""}</span>
+    `;
+    discTable.appendChild(row);
+  }
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  greetInputEl = document.querySelector("#greet-input");
-  greetMsgEl = document.querySelector("#greet-msg");
-  document.querySelector("#greet-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    greet();
+function updateProgress() {
+  const done = discs.filter((d) => d.status !== "pending").length;
+  const pct = discs.length === 0 ? 0 : Math.round((done / discs.length) * 100);
+  progressFill.style.width = `${pct}%`;
+}
+
+pickFolderBtn.addEventListener("click", async () => {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected) return;
+
+  currentFolder = selected;
+  folderLabel.textContent = selected;
+
+  const scanned = await invoke("prescan", { root: selected });
+  discs = scanned.map((d) => ({ ...d, status: "pending", message: "" }));
+  renderTable();
+  updateProgress();
+  convertBtn.disabled = discs.length === 0;
+});
+
+convertBtn.addEventListener("click", async () => {
+  try {
+    await invoke("start_conversion", { root: currentFolder });
+    convertBtn.style.display = "none";
+    cancelBtn.style.display = "inline-block";
+  } catch (err) {
+    alert(`No se pudo iniciar la conversion: ${err}`);
+  }
+});
+
+cancelBtn.addEventListener("click", async () => {
+  await invoke("cancel_conversion");
+});
+
+// Windows paths use backslashes; the backend reports the source path exactly
+// as chdman/cmd.exe see it (an absolute path like "C:\Games\GameA\Track.cue"),
+// while a ScannedDisc only carries { name, folder, kind } from the pre-scan.
+// Match by comparing the disc's folder+name against the tail of the reported
+// path, case-insensitively and with backslashes normalized to forward
+// slashes, so drive-letter casing or slash-style differences between the
+// scan and the log don't break the match. This assumes folder+name is
+// unique per run; two identically-named discs in different folders are
+// still disambiguated correctly since the folder is part of the comparison,
+// but a disc that appears twice under the *same* folder+name (not possible
+// from a single filesystem scan) would be ambiguous.
+function matchDiscByPath(path) {
+  const normalizedPath = path.toLowerCase().replace(/\\/g, "/");
+  return discs.find((d) => {
+    const discFull = `${d.folder}/${d.name}`.toLowerCase().replace(/\\/g, "/").replace(/\/+/g, "/");
+    return normalizedPath === discFull || normalizedPath.endsWith(`/${discFull}`.replace(/\/+/g, "/")) || normalizedPath.endsWith(discFull);
   });
+}
+
+listen("disc-updated", (event) => {
+  const { status, path, message } = event.payload;
+  const disc = matchDiscByPath(path);
+  if (disc) {
+    disc.status = status.toLowerCase(); // Rust enum serializes as "Ok" | "Skip" | "Fail"
+    disc.message = message;
+    renderTable();
+    updateProgress();
+  }
+});
+
+listen("run-finished", () => {
+  convertBtn.style.display = "inline-block";
+  cancelBtn.style.display = "none";
 });
