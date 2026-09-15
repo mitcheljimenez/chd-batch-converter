@@ -26,22 +26,33 @@ fn prescan(root: String) -> Vec<scanner::ScannedDisc> {
     scan_folder(std::path::Path::new(&root))
 }
 
+/// Resolves the app's config directory, surfacing a failure as a `Result`
+/// instead of panicking. Callers that can't propagate a `Result` (commands
+/// returning a bare value) degrade to a sensible default instead.
+fn resolve_app_config_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app_handle.path().app_config_dir().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_config(app_handle: tauri::AppHandle) -> Config {
-    let app_dir = app_handle.path().app_config_dir().expect("app config dir resolvable");
-    load_config(&app_dir)
+    match resolve_app_config_dir(&app_handle) {
+        Ok(app_dir) => load_config(&app_dir),
+        Err(_) => Config::default(),
+    }
 }
 
 #[tauri::command]
 fn set_config(app_handle: tauri::AppHandle, chdman_path: String) -> Result<(), String> {
-    let app_dir = app_handle.path().app_config_dir().expect("app config dir resolvable");
+    let app_dir = resolve_app_config_dir(&app_handle)?;
     save_config(&app_dir, &Config { chdman_path }).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_history(app_handle: tauri::AppHandle) -> Vec<RunRecord> {
-    let app_dir = app_handle.path().app_config_dir().expect("app config dir resolvable");
-    load_history(&app_dir)
+    match resolve_app_config_dir(&app_handle) {
+        Ok(app_dir) => load_history(&app_dir),
+        Err(_) => Vec::new(),
+    }
 }
 
 #[tauri::command]
@@ -65,7 +76,16 @@ fn start_conversion(
     root: String,
     state: tauri::State<RunState>,
 ) -> Result<(), String> {
-    let config = get_config(app_handle.clone());
+    // Reset the cancelled flag before anything else (including the
+    // chdman-path check and spawning). If this happened after spawning, a
+    // cancel_conversion racing in between the spawn and the reset could set
+    // the flag true and kill the process, only for this store(false) to
+    // immediately clobber it back to false — recording a genuinely
+    // cancelled run as cancelled: false.
+    state.1.store(false, Ordering::SeqCst);
+
+    let app_dir = resolve_app_config_dir(&app_handle)?;
+    let config = load_config(&app_dir);
     if config.chdman_path.is_empty() {
         return Err("chdman.exe path not configured".to_string());
     }
@@ -90,9 +110,6 @@ fn start_conversion(
     *state.0.lock().map_err(|e| e.to_string())? = Some(child);
 
     let cancelled_flag = state.1.clone();
-    cancelled_flag.store(false, Ordering::SeqCst);
-
-    let app_dir = app_handle.path().app_config_dir().expect("app config dir resolvable");
     let root_for_thread = root.clone();
 
     thread::spawn(move || {
@@ -118,12 +135,18 @@ fn start_conversion(
             // Stop when the process has exited AND we've drained the log.
             // A lightweight "is this PID still alive" check via tasklist,
             // since std::process::Child doesn't expose non-blocking wait
-            // across a Mutex boundary cleanly here.
-            let still_running = Command::new("tasklist")
+            // across a Mutex boundary cleanly here. Only a successful
+            // tasklist invocation whose output omits the PID counts as
+            // "not running" — if tasklist itself fails to run (transient
+            // spawn failure), assume the child is still running and retry
+            // on the next poll, rather than truncating the tail early.
+            let still_running = match Command::new("tasklist")
                 .args(["/FI", &format!("PID eq {}", pid)])
                 .output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-                .unwrap_or(false);
+            {
+                Ok(output) => String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()),
+                Err(_) => true,
+            };
 
             if !still_running {
                 // One final drain in case the process wrote its last lines
