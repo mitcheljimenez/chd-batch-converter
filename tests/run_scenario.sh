@@ -20,6 +20,19 @@ rm -rf "$WORK"
 mkdir -p "$WORK"
 cp -r "$FIXTURE_DIR/." "$WORK/"
 cp "$REPO_DIR/convertir_a_chd.bat" "$WORK/"
+
+if [ "$SCENARIO" = "missing_chdman" ]; then
+    # This scenario exercises the real "chdman.exe missing" guard, which
+    # requires CHDMAN_OVERRIDE to be UNDEFINED and no chdman.exe present.
+    # Run the script directly, without the mock or the override.
+    cd "$WORK"
+    WINDIR=$(wslpath -w "$PWD")
+    /mnt/c/WINDOWS/system32/cmd.exe /c "cd /d $WINDIR && convertir_a_chd.bat"
+
+    echo "RESULT_DIR:$WORK"
+    exit 0
+fi
+
 cp "$REPO_DIR/tests/mock_chdman.bat" "$WORK/mock_chdman.bat"
 
 # Create a wrapper script to set CHDMAN_OVERRIDE and run the main script

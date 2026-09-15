@@ -1,6 +1,10 @@
 @echo off
 rem Mimics chdman.exe's CLI surface for automated tests. Not real chdman.
-setlocal enabledelayedexpansion
+rem No delayed expansion here: this file never uses !VAR! syntax, and
+rem enabling it would corrupt %INPUT%/%OUTPUT% values that contain "!"
+rem (a real Tomba!.cue-style filename), since two such values combined
+rem on one line supply the "!...!" pair delayed expansion looks for.
+setlocal
 set "CMD=%~1"
 set "INPUT="
 set "OUTPUT="
@@ -27,7 +31,7 @@ goto :parse
 echo MOCK_CHDMAN %CMD% input=%INPUT% output=%OUTPUT%
 
 if /I "%CMD%"=="verify" (
-    echo %INPUT% | findstr /I "BADVERIFY" >nul
+    echo "%INPUT%"| findstr /I /C:"BADVERIFY" >nul
     if not errorlevel 1 (
         echo mock verify: FAILED
         exit /b 1
@@ -36,7 +40,7 @@ if /I "%CMD%"=="verify" (
     exit /b 0
 )
 
-echo %INPUT% | findstr /I "BADCUE BADISO" >nul
+echo "%INPUT%"| findstr /I /C:"BADCUE" /C:"BADISO" >nul
 if not errorlevel 1 (
     echo mock convert: FAILED
     exit /b 1
