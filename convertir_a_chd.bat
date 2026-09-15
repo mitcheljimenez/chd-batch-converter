@@ -3,12 +3,19 @@ setlocal
 
 if not "%~1"=="" (
     set "ROOT=%~1"
-    if not "%ROOT:~-1%"=="\" (
-        set "ROOT=%ROOT%\"
-    )
 ) else (
     set "ROOT=%~dp0"
 )
+rem The trailing-backslash normalization below must happen in a subroutine
+rem (not inline in the if/else above): reading %ROOT% for the substring
+rem check inside the same parenthesized block that just set it would see
+rem the pre-block (empty) value, since cmd.exe expands % variables once
+rem when it parses a parenthesized block, before any of the block's own
+rem "set" commands run. A CALL'd label parses fresh, so it sees the
+rem up-to-date value. (This app runs it with a folder argument via
+rem start_conversion; the original double-click/no-arg flow never hit
+rem this code path, so the bug was previously dormant.)
+call :ensure_trailing_backslash
 rem Test-only hook: tests/run_scenario.sh points this at tests/mock_chdman.bat
 rem so the suite can run without a real chdman.exe.
 if defined CHDMAN_OVERRIDE (
@@ -52,6 +59,10 @@ echo Listo. Convertidos=%COUNT_CONVERTED%  Saltados=%COUNT_SKIPPED%  Fallidos=%C
 echo Ver "%LOG%" para el detalle.
 pause >nul
 exit /b 0
+
+:ensure_trailing_backslash
+if not "%ROOT:~-1%"=="\" set "ROOT=%ROOT%\"
+goto :eof
 
 :log
 setlocal disabledelayedexpansion
