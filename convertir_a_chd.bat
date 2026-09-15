@@ -2,16 +2,16 @@
 setlocal enabledelayedexpansion
 
 set "ROOT=%~dp0"
-if defined CDHMAN_OVERRIDE (
-    set "CDHMAN=%CDHMAN_OVERRIDE%"
+if defined CHDMAN_OVERRIDE (
+    set "CHDMAN=%CHDMAN_OVERRIDE%"
 ) else (
-    set "CDHMAN=%ROOT%cdhman.exe"
+    set "CHDMAN=%ROOT%chdman.exe"
 )
 set "LOG=%ROOT%conversion_log.txt"
 
-if not exist "%CDHMAN%" (
-    echo ERROR: cdhman.exe no se encontro junto a este script ^(se esperaba en "%CDHMAN%"^).
-    echo Descarga cdhman.exe del paquete de herramientas de MAME y colocalo en esta carpeta.
+if not exist "%CHDMAN%" (
+    echo ERROR: chdman.exe no se encontro junto a este script ^(se esperaba en "%CHDMAN%"^).
+    echo Descarga chdman.exe del paquete de herramientas de MAME y colocalo en esta carpeta.
     exit /b 1
 )
 
