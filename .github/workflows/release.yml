@@ -49,4 +49,4 @@ jobs:
           releaseName: "CHD Converter ${{ github.ref_name }}"
           releaseDraft: false
           prerelease: false
-          args: --config '{"bundle":{"windows":{"certificateThumbprint":"ADEF2B14DE4A6012C0CD6AC765321D9EADFBA213","digestAlgorithm":"sha256"}}}'
+          args: --config '{"bundle":{"windows":{"certificateThumbprint":"B67A6BC6ACA22ACA015E3E95B0950B84C3A09A9D","digestAlgorithm":"sha256"}}}'
