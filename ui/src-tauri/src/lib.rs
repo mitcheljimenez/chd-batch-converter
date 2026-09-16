@@ -70,9 +70,9 @@ fn get_config(app_handle: tauri::AppHandle) -> Config {
 }
 
 #[tauri::command]
-fn set_config(app_handle: tauri::AppHandle, chdman_path: String) -> Result<(), String> {
+fn set_config(app_handle: tauri::AppHandle, chdman_path: String, auto_update_enabled: bool) -> Result<(), String> {
     let app_dir = resolve_app_config_dir(&app_handle)?;
-    save_config(&app_dir, &Config { chdman_path, ..Default::default() }).map_err(|e| e.to_string())
+    save_config(&app_dir, &Config { chdman_path, auto_update_enabled }).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

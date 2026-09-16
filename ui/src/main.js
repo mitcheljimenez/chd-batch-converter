@@ -136,6 +136,9 @@ const chdmanPathInput = document.getElementById("chdman-path-input");
 const saveSettingsBtn = document.getElementById("save-settings-btn");
 const historyBtn = document.getElementById("history-btn");
 const historyPanel = document.getElementById("history-panel");
+const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
+const checkUpdatesBtn = document.getElementById("check-updates-btn");
+const updateStatus = document.getElementById("update-status");
 
 settingsBtn.addEventListener("click", async () => {
   historyPanel.style.display = "none";
@@ -143,12 +146,16 @@ settingsBtn.addEventListener("click", async () => {
   if (isHidden) {
     const config = await invoke("get_config");
     chdmanPathInput.value = config.chdman_path;
+    autoUpdateCheckbox.checked = config.auto_update_enabled;
   }
   settingsPanel.style.display = isHidden ? "flex" : "none";
 });
 
 saveSettingsBtn.addEventListener("click", async () => {
-  await invoke("set_config", { chdmanPath: chdmanPathInput.value });
+  await invoke("set_config", {
+    chdmanPath: chdmanPathInput.value,
+    autoUpdateEnabled: autoUpdateCheckbox.checked,
+  });
   settingsPanel.style.display = "none";
 });
 
@@ -171,3 +178,61 @@ historyBtn.addEventListener("click", async () => {
   }
   historyPanel.style.display = isHidden ? "flex" : "none";
 });
+
+function showUpdateResult(text) {
+  updateStatus.textContent = text;
+}
+
+async function promptAndMaybeInstall(update, { alwaysReport }) {
+  if (!update) {
+    if (alwaysReport) showUpdateResult("Ya tenés la última versión");
+    return;
+  }
+
+  if (autoUpdateCheckbox.checked) {
+    showUpdateResult(`Instalando v${update.version}...`);
+    try {
+      await invoke("install_update");
+      // install_update restarts the app on success; if we're still here,
+      // it returned an error (e.g. a conversion was running) instead of
+      // throwing, which shouldn't happen given it's a Result — but stay
+      // defensive since the app not restarting would otherwise look like
+      // nothing happened.
+    } catch (err) {
+      showUpdateResult(`No se pudo instalar: ${err}`);
+    }
+    return;
+  }
+
+  const install = confirm(`Hay una actualización disponible (v${update.version}). ¿Instalar ahora?`);
+  if (install) {
+    showUpdateResult(`Instalando v${update.version}...`);
+    try {
+      await invoke("install_update");
+    } catch (err) {
+      showUpdateResult(`No se pudo instalar: ${err}`);
+    }
+  } else if (alwaysReport) {
+    showUpdateResult(`Actualización v${update.version} disponible (Buscar actualizaciones para instalar)`);
+  }
+}
+
+checkUpdatesBtn.addEventListener("click", async () => {
+  showUpdateResult("Buscando...");
+  try {
+    const update = await invoke("check_for_update");
+    await promptAndMaybeInstall(update, { alwaysReport: true });
+  } catch (err) {
+    showUpdateResult("No se pudo comprobar (sin conexión)");
+  }
+});
+
+(async () => {
+  try {
+    const update = await invoke("check_for_update");
+    await promptAndMaybeInstall(update, { alwaysReport: false });
+  } catch {
+    // Silent by design: a failed startup check (offline, GitHub down)
+    // must not interrupt opening the app or show an alert.
+  }
+})();
