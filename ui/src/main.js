@@ -12,6 +12,7 @@ let discs = []; // [{ name, folder, kind, status: "pending"|"ok"|"skip"|"fail", 
 
 const pickFolderBtn = document.getElementById("pick-folder-btn");
 const rescanBtn = document.getElementById("rescan-btn");
+const convertOpenFolderBtn = document.getElementById("convert-open-folder-btn");
 const folderLabel = document.getElementById("folder-label");
 const convertBtn = document.getElementById("convert-btn");
 const cancelBtn = document.getElementById("cancel-btn");
@@ -120,6 +121,7 @@ navSettings.addEventListener("click", () => showView("settings"));
 function applyTranslations() {
   pickFolderBtn.textContent = t("pickFolder");
   rescanBtn.textContent = t("rescan");
+  convertOpenFolderBtn.textContent = t("openFolder");
   folderLabel.textContent = currentFolder ?? t("noFolderSelected");
   convertBtn.textContent = t("convertAll");
   cancelBtn.textContent = t("cancel");
@@ -263,8 +265,13 @@ runMoveChdBtn.addEventListener("click", async () => {
   }
 });
 
-moveChdOpenDestBtn.addEventListener("click", () => {
-  if (moveChdDestination) openPath(moveChdDestination);
+moveChdOpenDestBtn.addEventListener("click", async () => {
+  if (!moveChdDestination) return;
+  try {
+    await openPath(moveChdDestination);
+  } catch (err) {
+    alert(translateError(err));
+  }
 });
 
 async function rescan(root) {
@@ -285,6 +292,7 @@ pickFolderBtn.addEventListener("click", async () => {
   updateOrganizeAvailability();
   updateMoveChdAvailability();
   rescanBtn.disabled = false;
+  convertOpenFolderBtn.disabled = false;
 
   await rescan(selected);
 });
@@ -292,6 +300,15 @@ pickFolderBtn.addEventListener("click", async () => {
 rescanBtn.addEventListener("click", async () => {
   if (!currentFolder) return;
   await rescan(currentFolder);
+});
+
+convertOpenFolderBtn.addEventListener("click", async () => {
+  if (!currentFolder) return;
+  try {
+    await openPath(currentFolder);
+  } catch (err) {
+    alert(translateError(err));
+  }
 });
 
 function updateSdCardIdVisibility() {
@@ -326,8 +343,13 @@ runOrganizeBtn.addEventListener("click", async () => {
   }
 });
 
-organizeOpenDestBtn.addEventListener("click", () => {
-  if (organizeDestination) openPath(organizeDestination);
+organizeOpenDestBtn.addEventListener("click", async () => {
+  if (!organizeDestination) return;
+  try {
+    await openPath(organizeDestination);
+  } catch (err) {
+    alert(translateError(err));
+  }
 });
 
 convertBtn.addEventListener("click", async () => {
@@ -418,6 +440,11 @@ listen("run-finished", (event) => {
   convertBtn.disabled = discs.length === 0;
   cancelBtn.style.display = "none";
   rescanBtn.disabled = false;
+  // The fill has a permanent shimmer animation while it's visible (it reads
+  // as "still working" otherwise) — hide the whole track once the run is
+  // done instead of just leaving it parked near 100%, or it visibly keeps
+  // flickering after conversion has actually finished.
+  progressTrack.style.display = "none";
 });
 
 saveSettingsBtn.addEventListener("click", async () => {
