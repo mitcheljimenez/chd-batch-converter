@@ -9,36 +9,75 @@
 
   <body>
     <div id="app">
-      <div class="toolbar">
+      <div id="top-bar" class="toolbar">
         <button id="pick-folder-btn">Elegir carpeta</button>
         <span id="folder-label">Ninguna carpeta seleccionada</span>
-        <button id="convert-btn" disabled>Convertir todo</button>
-        <button id="cancel-btn" class="secondary" style="display:none">Cancelar</button>
       </div>
 
-      <div class="toolbar">
-        <button id="settings-btn" class="secondary">Configuración</button>
-        <button id="history-btn" class="secondary">Historial</button>
+      <div id="app-body">
+        <nav id="sidebar">
+          <button id="nav-convert" class="nav-item active">Convertir</button>
+          <button id="nav-organize" class="nav-item">Organizar multi-disco</button>
+          <button id="nav-history" class="nav-item">Historial</button>
+          <button id="nav-settings" class="nav-item">Configuración</button>
+        </nav>
+
+        <main id="app-content">
+          <section id="convert-view" class="view">
+            <div class="toolbar">
+              <button id="convert-btn" disabled>Convertir todo</button>
+              <button id="cancel-btn" class="secondary" style="display:none">Cancelar</button>
+            </div>
+            <div id="progress-bar-track" style="display:none"><div id="progress-bar-fill"></div></div>
+            <div id="disc-table"></div>
+          </section>
+
+          <section id="organize-view" class="view panel-view" style="display:none">
+            <p id="organize-explanation">Esto va a mover los archivos de juegos multi-disco (Disc 1, Disc 2, etc.) a carpetas separadas y crear un .m3u para cada uno.</p>
+            <p id="organize-no-folder-hint">Elegí una carpeta primero.</p>
+            <label>
+              <input type="radio" name="storage-mode" id="storage-mode-pc" value="pc" checked />
+              <span id="storage-mode-pc-label">Solo PC (rutas relativas)</span>
+            </label>
+            <label>
+              <input type="radio" name="storage-mode" id="storage-mode-internal" value="internal" />
+              <span id="storage-mode-internal-label">Almacenamiento interno de Android</span>
+            </label>
+            <label>
+              <input type="radio" name="storage-mode" id="storage-mode-external" value="external" />
+              <span id="storage-mode-external-label">Tarjeta SD externa</span>
+              <span id="storage-mode-external-tooltip" class="tooltip-icon" tabindex="0">?</span>
+            </label>
+            <input id="sd-card-id-input" type="text" placeholder="ej. 1234-5678" style="display:none" />
+            <button id="run-organize-btn" disabled>Organizar</button>
+          </section>
+
+          <section id="history-view" class="view panel-view" style="display:none">
+            <div id="history-panel"></div>
+          </section>
+
+          <section id="settings-view" class="view panel-view" style="display:none">
+            <label id="chdman-path-label" for="chdman-path-input">Ruta de chdman.exe</label>
+            <input id="chdman-path-input" type="text" placeholder="C:\Tools\chdman.exe" />
+            <label>
+              <input id="auto-update-checkbox" type="checkbox" />
+              <span id="auto-update-label-text">Instalar actualizaciones automáticamente</span>
+            </label>
+            <label>
+              <span id="language-label-text">Idioma</span>
+              <select id="language-select">
+                <option value="es">Español</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <button id="save-settings-btn">Guardar</button>
+            <div class="toolbar">
+              <button id="check-updates-btn" class="secondary">Buscar actualizaciones</button>
+              <span id="update-status"></span>
+            </div>
+          </section>
+        </main>
       </div>
-
-      <div id="settings-panel" class="panel" style="display:none">
-        <label for="chdman-path-input">Ruta de chdman.exe</label>
-        <input id="chdman-path-input" type="text" placeholder="C:\Tools\chdman.exe" />
-        <label>
-          <input id="auto-update-checkbox" type="checkbox" />
-          Instalar actualizaciones automáticamente
-        </label>
-        <button id="save-settings-btn">Guardar</button>
-        <div class="toolbar">
-          <button id="check-updates-btn" class="secondary">Buscar actualizaciones</button>
-          <span id="update-status"></span>
-        </div>
-      </div>
-
-      <div id="history-panel" class="panel" style="display:none"></div>
-
-      <div id="progress-bar-track" style="display:none"><div id="progress-bar-fill"></div></div>
-      <div id="disc-table"></div>
     </div>
     <script type="module" src="/main.js"></script>
   </body>

@@ -27,6 +27,50 @@ body {
   gap: 16px;
 }
 
+#app-body {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  min-height: 0;
+}
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.nav-item {
+  background: transparent;
+  color: var(--text-dim);
+  text-align: left;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+}
+
+.nav-item:hover { background: var(--surface-hover); color: var(--text); }
+.nav-item.active { background: var(--accent); color: white; }
+
+#app-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
 .toolbar {
   display: flex;
   gap: 12px;
@@ -95,18 +139,15 @@ button.secondary { background: var(--surface-hover); }
 .status-skip { color: var(--skip); }
 .status-pending { color: var(--text-dim); }
 
-.panel {
+.panel-view {
   background: var(--surface);
   border-radius: 8px;
   padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
-.panel label { color: var(--text-dim); font-size: 13px; }
+.panel-view label { color: var(--text-dim); font-size: 13px; }
 
-.panel input {
+.panel-view input[type="text"] {
   background: var(--bg);
   border: 1px solid var(--surface-hover);
   border-radius: 6px;
@@ -114,6 +155,8 @@ button.secondary { background: var(--surface-hover); }
   color: var(--text);
   font-size: 14px;
 }
+
+#organize-no-folder-hint { color: var(--text-dim); font-style: italic; }
 
 .history-row {
   display: flex;
@@ -124,3 +167,16 @@ button.secondary { background: var(--surface-hover); }
 }
 
 .history-row .history-folder { flex: 1; color: var(--text-dim); }
+
+.tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 11px;
+  cursor: help;
+}

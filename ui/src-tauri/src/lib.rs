@@ -1,4 +1,5 @@
 pub mod log_tail;
+mod organizer;
 mod scanner;
 mod settings;
 
@@ -21,6 +22,7 @@ use tauri_plugin_updater::UpdaterExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use log_tail::{parse_log_line, LogTailer};
+use organizer::{organize_multidisc as run_organize_multidisc, OrganizeSummary};
 use scanner::scan_folder;
 use settings::{append_history, load_config, load_history, save_config, Config, RunRecord};
 
@@ -40,6 +42,16 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 fn prescan(root: String) -> Vec<scanner::ScannedDisc> {
     scan_folder(std::path::Path::new(&root))
+}
+
+/// `android_base`, when present, is the Android-side path this folder maps
+/// to (e.g. `/storage/emulated/0/ROMs` or `/storage/1234-5678/ROMs`) — the
+/// UI collects it from the user only when they want playlists usable after
+/// copying to an Android device; omitted, playlists use plain relative
+/// filenames (correct for organizing on the same PC ES-DE runs on too).
+#[tauri::command]
+fn organize_multidisc(root: String, android_base: Option<String>) -> Result<OrganizeSummary, String> {
+    run_organize_multidisc(std::path::Path::new(&root), android_base.as_deref())
 }
 
 /// Resolves the app's config directory, surfacing a failure as a `Result`
@@ -70,9 +82,22 @@ fn get_config(app_handle: tauri::AppHandle) -> Config {
 }
 
 #[tauri::command]
-fn set_config(app_handle: tauri::AppHandle, chdman_path: String, auto_update_enabled: bool) -> Result<(), String> {
+fn set_config(
+    app_handle: tauri::AppHandle,
+    chdman_path: String,
+    auto_update_enabled: bool,
+    language: String,
+) -> Result<(), String> {
     let app_dir = resolve_app_config_dir(&app_handle)?;
-    save_config(&app_dir, &Config { chdman_path, auto_update_enabled }).map_err(|e| e.to_string())
+    save_config(
+        &app_dir,
+        &Config {
+            chdman_path,
+            auto_update_enabled,
+            language,
+        },
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -155,7 +180,7 @@ async fn install_update(
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         if guard.is_some() {
-            return Err("Hay una conversión en curso; se reintentará luego".to_string());
+            return Err("UPDATE_DEFERRED_CONVERSION_IN_PROGRESS".to_string());
         }
     }
 
@@ -164,7 +189,7 @@ async fn install_update(
         .check()
         .await
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "No hay actualización disponible".to_string())?;
+        .ok_or_else(|| "NO_UPDATE_AVAILABLE".to_string())?;
 
     update
         .download_and_install(|_chunk_len, _total| {}, || {})
@@ -201,7 +226,7 @@ fn start_conversion(
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         if guard.is_some() {
-            return Err("Ya hay una conversión en curso".to_string());
+            return Err("CONVERSION_IN_PROGRESS".to_string());
         }
     }
 
@@ -222,9 +247,9 @@ fn start_conversion(
         let fallback = app_handle
             .path()
             .resolve("build-assets/chdman.exe", tauri::path::BaseDirectory::Resource)
-            .map_err(|_| "chdman.exe path not configured".to_string())?;
+            .map_err(|_| "CHDMAN_NOT_CONFIGURED".to_string())?;
         if !fallback.exists() {
-            return Err("chdman.exe path not configured".to_string());
+            return Err("CHDMAN_NOT_CONFIGURED".to_string());
         }
         strip_verbatim_prefix(&fallback.to_string_lossy())
     } else {
@@ -232,16 +257,13 @@ fn start_conversion(
     };
 
     if !std::path::Path::new(&chdman_path).exists() {
-        return Err(format!(
-            "chdman.exe no encontrado en la ruta configurada: {}",
-            chdman_path
-        ));
+        return Err(format!("CHDMAN_NOT_FOUND:{}", chdman_path));
     }
 
     let script_path = app_handle
         .path()
         .resolve("build-assets/convertir_a_chd.bat", tauri::path::BaseDirectory::Resource)
-        .map_err(|_| "bundled convertir_a_chd.bat not found".to_string())?;
+        .map_err(|_| "SCRIPT_NOT_FOUND".to_string())?;
 
     let log_path = std::path::Path::new(&root).join("conversion_log.txt");
     let _ = std::fs::remove_file(&log_path); // start each run from a clean log for the tailer's offset to make sense
@@ -362,6 +384,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             prescan,
+            organize_multidisc,
             get_config,
             set_config,
             get_history,

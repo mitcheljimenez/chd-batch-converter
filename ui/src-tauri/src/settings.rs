@@ -3,11 +3,27 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+fn default_language() -> String {
+    "es".to_string()
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub chdman_path: String,
     #[serde(default)]
     pub auto_update_enabled: bool,
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            chdman_path: String::new(),
+            auto_update_enabled: false,
+            language: default_language(),
+        }
+    }
 }
 
 pub fn load_config(app_dir: &Path) -> Config {
@@ -77,6 +93,7 @@ mod tests {
         let config = Config {
             chdman_path: "C:\\Tools\\chdman.exe".to_string(),
             auto_update_enabled: false,
+            language: "es".to_string(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
@@ -132,10 +149,33 @@ mod tests {
         let config = Config {
             chdman_path: "C:\\Tools\\chdman.exe".to_string(),
             auto_update_enabled: true,
+            language: "es".to_string(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
         assert_eq!(loaded.auto_update_enabled, true);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_config_defaults_language_to_es() {
+        let dir = temp_dir("missing_config_language");
+        let config = load_config(&dir);
+        assert_eq!(config.language, "es");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_then_load_config_round_trips_language() {
+        let dir = temp_dir("round_trip_language");
+        let config = Config {
+            chdman_path: "C:\\Tools\\chdman.exe".to_string(),
+            auto_update_enabled: false,
+            language: "en".to_string(),
+        };
+        save_config(&dir, &config).unwrap();
+        let loaded = load_config(&dir);
+        assert_eq!(loaded.language, "en");
         fs::remove_dir_all(&dir).unwrap();
     }
 }

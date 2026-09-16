@@ -1,40 +1,83 @@
 # CHD Batch Converter
 
-Script `.bat` para convertir en lote colecciones de PS1 (`.bin`/`.cue`) y
-PS2/PSP (`.iso`) a `.chd` usando `chdman.exe` (de MAME), verificando cada
-archivo generado.
+`.bat` script to batch-convert PS1 (`.bin`/`.cue`) and PS2/PSP (`.iso`) game
+collections to `.chd` using `chdman.exe` (from MAME), verifying every
+generated file.
 
-## Uso
+## Usage
 
-1. Descarga `chdman.exe` (paquete de herramientas de MAME) y colócalo en la
-   misma carpeta que `convertir_a_chd.bat`.
-2. Coloca `convertir_a_chd.bat` en la carpeta raíz de tu colección de juegos
-   (ya sea con subcarpetas por juego, o con los archivos sueltos).
-3. Haz doble clic en `convertir_a_chd.bat` (o corre `convertir_a_chd.bat`
-   desde una consola).
-4. Revisa `conversion_log.txt`, generado junto al script, para el detalle de
-   cada conversión y verificación.
+1. Download `chdman.exe` (part of the MAME tools package) and place it in
+   the same folder as `convertir_a_chd.bat`.
+2. Put `convertir_a_chd.bat` in the root folder of your game collection
+   (whether it uses per-game subfolders or loose files).
+3. Double-click `convertir_a_chd.bat` (or run it from a console).
+4. Check `conversion_log.txt`, generated next to the script, for the
+   details of each conversion and verification.
 
-## Comportamiento
+## Behavior
 
-- Recorre recursivamente todas las subcarpetas (y la carpeta raíz misma).
-- `.cue` → convertido con `chdman createcd`.
-- `.iso` (solo si no hay ningún `.cue` en esa misma carpeta) → convertido
-  con `chdman createdvd`.
-- El `.chd` resultante se escribe junto al archivo original.
-- Si el `.chd` ya existe, se salta esa conversión (permite re-correr el
-  script sin repetir trabajo).
-- Cada `.chd` generado se verifica con `chdman verify`.
-- Los archivos originales (`.bin`/`.cue`/`.iso`) nunca se modifican, mueven
-  ni borran.
+- Recursively walks every subfolder (and the root folder itself).
+- `.cue` → converted with `chdman createcd`.
+- `.iso` (only if there's no `.cue` in that same folder) → converted with
+  `chdman createdvd`.
+- The resulting `.chd` is written next to the original file.
+- If the `.chd` already exists, that conversion is skipped (so the script
+  can be re-run without repeating work).
+- Every generated `.chd` is verified with `chdman verify`.
+- Original files (`.bin`/`.cue`/`.iso`) are never modified, moved, or
+  deleted.
 
-## Diseño y plan de implementación
+## Desktop app
 
-Ver `docs/superpowers/specs/2026-09-14-chd-batch-converter-design.md` y
+If you'd rather not use the command line, there's a desktop app with a
+graphical interface (Windows) in [`ui/`](ui/), with folder selection, live
+progress, conversion history, automatic updates, and an ES-DE multi-disc
+game organizer (credit to
+[ItsRetroPup/ES-DE-Multi-Disc-ROM-Organizer](https://github.com/ItsRetroPup/ES-DE-Multi-Disc-ROM-Organizer)
+for the original concept — see [`ui/README.md`](ui/README.md#organize-multi-disc-games)
+for details). Ready-to-run installers are available on
+[GitHub Releases](https://github.com/mitcheljimenez/chd-batch-converter/releases/latest).
+
+## Roadmap
+
+Rough priority order, highest first — not commitments or dates, just
+where effort would likely pay off most:
+
+1. **Linux and macOS builds of the desktop app.** Tauri already targets
+   both; the real work is replacing `convertir_a_chd.bat`'s Windows-only
+   pieces (`cmd.exe`/batch, `\\?\`-prefixed paths, `taskkill`) with a
+   cross-platform conversion path, and — for macOS — code-signing and
+   notarization so Gatekeeper doesn't block the app outright (Windows
+   SmartScreen at least lets you click through).
+2. **A real code-signing certificate.** The self-signed one works but
+   still shows an "unknown publisher" warning on every fresh install;
+   a certificate from a public CA would remove that, at a real
+   recurring cost.
+3. **Parallel conversion.** Discs currently convert one at a time;
+   running a few `chdman` processes concurrently would meaningfully
+   speed up large libraries on multi-core machines.
+4. **A "verify only" pass** — re-run `chdman verify` against existing
+   `.chd` files without reconverting, useful after a drive move or to
+   catch bit rot.
+5. **CI smoke tests on every push**, not just the release pipeline —
+   catch a broken build before it's tagged, not after.
+6. **More languages** if there's demand — the Settings selector already
+   supports adding a language as a self-contained dictionary in
+   `ui/src/i18n.js`, so this is mostly translation work, not plumbing.
+7. **A conversion log viewer in the app** — right now a failure only
+   shows a short message; being able to expand it to the full
+   `conversion_log.txt` for that game would help diagnosing chdman
+   errors without leaving the app.
+8. **Config profiles** for people who juggle more than one ROMs
+   directory or chdman path (e.g. separate PC and handheld libraries).
+
+## Design and implementation plan
+
+See `docs/superpowers/specs/2026-09-14-chd-batch-converter-design.md` and
 `docs/superpowers/plans/2026-09-14-chd-batch-converter.md`.
 
-## Pruebas
+## Tests
 
-`tests/run_scenario.sh <nombre>` corre `convertir_a_chd.bat` de verdad (vía
-`cmd.exe`/interop de WSL2) contra los fixtures en `tests/fixtures/<nombre>/`,
-usando `tests/mock_chdman.bat` en lugar de un `chdman.exe` real.
+`tests/run_scenario.sh <name>` runs `convertir_a_chd.bat` for real (via
+`cmd.exe`/WSL2 interop) against the fixtures in `tests/fixtures/<name>/`,
+using `tests/mock_chdman.bat` instead of a real `chdman.exe`.
