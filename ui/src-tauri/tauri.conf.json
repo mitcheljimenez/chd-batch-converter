@@ -33,5 +33,13 @@
       "build-assets/convertir_a_chd.bat",
       "build-assets/chdman.exe"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/mitcheljimenez/chd-batch-converter/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_WITH_REAL_PUBKEY_FROM_TAURI_SIGNER_GENERATE"
+    }
   }
 }
