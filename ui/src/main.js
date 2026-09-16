@@ -76,7 +76,7 @@ convertBtn.addEventListener("click", async () => {
     // A real failure (bad chdman path, spawn error) must not lock the button
     // forever — re-enable so the user can fix the setting and retry.
     convertBtn.disabled = false;
-    alert(`No se pudo iniciar la conversion: ${err}`);
+    alert(`No se pudo iniciar la conversión: ${err}`);
   }
 });
 
@@ -185,7 +185,7 @@ function showUpdateResult(text) {
 
 async function promptAndMaybeInstall(update, { alwaysReport }) {
   if (!update) {
-    if (alwaysReport) showUpdateResult("Ya tenés la última versión");
+    if (alwaysReport) showUpdateResult("Ya tienes la última versión");
     return;
   }
 
