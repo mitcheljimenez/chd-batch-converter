@@ -265,6 +265,32 @@ button.secondary { background: var(--surface-hover); }
   white-space: pre-line;
 }
 
+#update-overlay-notes {
+  width: 220px;
+  max-height: 90px;
+  overflow-y: auto;
+  text-align: left;
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+#update-overlay-notes-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, var(--text));
+}
+
+#update-overlay-notes-body {
+  margin: 0;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
 #update-overlay-progress-track {
   width: 220px;
   height: 6px;

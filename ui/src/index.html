@@ -13,6 +13,10 @@
         <img id="update-overlay-logo" src="/assets/app-icon.png" alt="" />
         <div id="update-overlay-spinner"></div>
         <p id="update-overlay-text"></p>
+        <div id="update-overlay-notes" style="display:none">
+          <p id="update-overlay-notes-label"></p>
+          <pre id="update-overlay-notes-body"></pre>
+        </div>
         <div id="update-overlay-progress-track" style="display:none">
           <div id="update-overlay-progress-fill"></div>
         </div>
@@ -67,6 +71,7 @@
             </label>
             <input id="sd-card-id-input" type="text" placeholder="ej. 1234-5678" style="display:none" />
             <button id="run-organize-btn" disabled>Organizar</button>
+            <button id="organize-open-dest-btn" class="secondary" style="display:none">Abrir carpeta destino</button>
           </section>
 
           <section id="move-chd-view" class="view panel-view" style="display:none">
@@ -77,6 +82,7 @@
               <span id="move-chd-dest-label">Ninguna carpeta destino seleccionada</span>
             </div>
             <button id="run-move-chd-btn" disabled>Mover</button>
+            <button id="move-chd-open-dest-btn" class="secondary" style="display:none">Abrir carpeta destino</button>
           </section>
 
           <section id="history-view" class="view panel-view" style="display:none">

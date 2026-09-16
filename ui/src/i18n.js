@@ -36,7 +36,7 @@ const translations = {
     storageModeInternal: "Almacenamiento interno de Android",
     storageModeExternal: "Tarjeta SD externa",
     storageExternalTooltip:
-      "Usá esto si vas a copiar las carpetas organizadas a la tarjeta SD de tu celular o handheld Android. Necesitás el ID de esa tarjeta: en el dispositivo, abrí una app de administrador de archivos, entrá al almacenamiento externo/SD, y fijate la ruta que muestra — algo como /storage/1234-5678/. Esa parte \"1234-5678\" es el ID que tenés que escribir acá.",
+      "Usa esto si vas a copiar las carpetas organizadas a la tarjeta SD de tu celular o handheld Android. Necesitas el ID de esa tarjeta: en el dispositivo, abre una app de administrador de archivos, entra al almacenamiento externo/SD, y fíjate en la ruta que muestra — algo como /storage/1234-5678/. Esa parte \"1234-5678\" es el ID que tienes que escribir aquí.",
     sdCardIdPlaceholder: "ID de la tarjeta SD, ej. 1234-5678",
     runOrganize: "Organizar",
     organizeSummary: ({ games_organized, files_moved, skipped_already_organized }) =>
@@ -58,10 +58,12 @@ const translations = {
         ? `. ${renamed_due_to_collision} se renombraron para no sobrescribir un archivo existente con el mismo nombre.`
         : "."),
     moveChdFailed: (err) => `No se pudo mover: ${err}`,
+    openDestFolder: "Abrir carpeta destino",
     updateNoticeAuto: (version) =>
       `Hay una actualización disponible (v${version}). Se va a instalar automáticamente.`,
     updateDownloading: (version, pct) => `Descargando actualización v${version}... ${pct}%`,
     updateInstallingOverlay: "Instalando...",
+    updateReleaseNotesLabel: "Novedades de esta versión:",
     updateDoneOverlay: (version) => `¡Listo! Se actualizó a la versión ${version}.`,
     updateRestartNow: "Reiniciar ahora",
     updateErrorOverlay: (err) => `No se pudo actualizar: ${err}`,
@@ -136,10 +138,12 @@ const translations = {
         ? `. ${renamed_due_to_collision} were renamed to avoid overwriting an existing file with the same name.`
         : "."),
     moveChdFailed: (err) => `Could not move: ${err}`,
+    openDestFolder: "Open destination folder",
     updateNoticeAuto: (version) =>
       `An update is available (v${version}). It will be installed automatically.`,
     updateDownloading: (version, pct) => `Downloading update v${version}... ${pct}%`,
     updateInstallingOverlay: "Installing...",
+    updateReleaseNotesLabel: "What's new in this version:",
     updateDoneOverlay: (version) => `Done! Updated to version ${version}.`,
     updateRestartNow: "Restart now",
     updateErrorOverlay: (err) => `Could not update: ${err}`,

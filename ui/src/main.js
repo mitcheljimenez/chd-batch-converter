@@ -3,6 +3,7 @@ import { t, setLanguage, translateError } from "./i18n.js";
 const { invoke } = window.__TAURI__.core;
 const { open } = window.__TAURI__.dialog;
 const { listen } = window.__TAURI__.event;
+const { openPath } = window.__TAURI__.opener;
 
 let currentFolder = null;
 let organizeDestination = null;
@@ -42,6 +43,7 @@ const storageModeExternalTooltip = document.getElementById("storage-mode-externa
 const storageModeExternalRadio = document.getElementById("storage-mode-external");
 const sdCardIdInput = document.getElementById("sd-card-id-input");
 const runOrganizeBtn = document.getElementById("run-organize-btn");
+const organizeOpenDestBtn = document.getElementById("organize-open-dest-btn");
 const organizePickDestBtn = document.getElementById("organize-pick-dest-btn");
 const organizeDestLabel = document.getElementById("organize-dest-label");
 const moveChdExplanation = document.getElementById("move-chd-explanation");
@@ -49,6 +51,7 @@ const moveChdNoFolderHint = document.getElementById("move-chd-no-folder-hint");
 const moveChdPickDestBtn = document.getElementById("move-chd-pick-dest-btn");
 const moveChdDestLabel = document.getElementById("move-chd-dest-label");
 const runMoveChdBtn = document.getElementById("run-move-chd-btn");
+const moveChdOpenDestBtn = document.getElementById("move-chd-open-dest-btn");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
 const languageLabelText = document.getElementById("language-label-text");
@@ -61,6 +64,9 @@ const updateOverlayText = document.getElementById("update-overlay-text");
 const updateOverlayProgressTrack = document.getElementById("update-overlay-progress-track");
 const updateOverlayProgressFill = document.getElementById("update-overlay-progress-fill");
 const updateOverlayActionBtn = document.getElementById("update-overlay-action-btn");
+const updateOverlayNotes = document.getElementById("update-overlay-notes");
+const updateOverlayNotesLabel = document.getElementById("update-overlay-notes-label");
+const updateOverlayNotesBody = document.getElementById("update-overlay-notes-body");
 
 const views = {
   convert: convertView,
@@ -134,12 +140,14 @@ function applyTranslations() {
   runOrganizeBtn.textContent = t("runOrganize");
   organizePickDestBtn.textContent = t("pickDestination");
   organizeDestLabel.textContent = organizeDestination ?? t("noDestinationSelected");
+  organizeOpenDestBtn.textContent = t("openDestFolder");
   navMoveChd.textContent = t("navMoveChd");
   moveChdExplanation.textContent = t("moveChdExplanation");
   moveChdNoFolderHint.textContent = t("moveChdNoFolderHint");
   moveChdPickDestBtn.textContent = t("pickDestination");
   moveChdDestLabel.textContent = moveChdDestination ?? t("noDestinationSelected");
   runMoveChdBtn.textContent = t("runMoveChd");
+  moveChdOpenDestBtn.textContent = t("openDestFolder");
 }
 
 function mk(cls, text) {
@@ -229,6 +237,7 @@ organizePickDestBtn.addEventListener("click", async () => {
   if (!selected) return;
   organizeDestination = selected;
   organizeDestLabel.textContent = selected;
+  organizeOpenDestBtn.style.display = "none";
   updateOrganizeAvailability();
 });
 
@@ -237,6 +246,7 @@ moveChdPickDestBtn.addEventListener("click", async () => {
   if (!selected) return;
   moveChdDestination = selected;
   moveChdDestLabel.textContent = selected;
+  moveChdOpenDestBtn.style.display = "none";
   updateMoveChdAvailability();
 });
 
@@ -245,9 +255,14 @@ runMoveChdBtn.addEventListener("click", async () => {
   try {
     const summary = await invoke("move_chd_files", { root: currentFolder, destination: moveChdDestination });
     alert(t("moveChdSummary", summary));
+    moveChdOpenDestBtn.style.display = summary.files_moved > 0 ? "inline-block" : "none";
   } catch (err) {
     alert(t("moveChdFailed", translateError(err)));
   }
+});
+
+moveChdOpenDestBtn.addEventListener("click", () => {
+  if (moveChdDestination) openPath(moveChdDestination);
 });
 
 pickFolderBtn.addEventListener("click", async () => {
@@ -293,9 +308,14 @@ runOrganizeBtn.addEventListener("click", async () => {
       androidBase,
     });
     alert(t("organizeSummary", summary));
+    organizeOpenDestBtn.style.display = summary.games_organized > 0 ? "inline-block" : "none";
   } catch (err) {
     alert(t("organizeFailed", translateError(err)));
   }
+});
+
+organizeOpenDestBtn.addEventListener("click", () => {
+  if (organizeDestination) openPath(organizeDestination);
 });
 
 convertBtn.addEventListener("click", async () => {
@@ -474,11 +494,18 @@ async function installWithOverlay(update) {
   updateOverlayProgressFill.style.width = "0%";
   updateOverlayText.textContent = t("updateNoticeAuto", update.version);
 
+  if (update.notes && update.notes.trim()) {
+    updateOverlayNotesLabel.textContent = t("updateReleaseNotesLabel");
+    updateOverlayNotesBody.textContent = update.notes;
+    updateOverlayNotes.style.display = "block";
+  } else {
+    updateOverlayNotes.style.display = "none";
+  }
+
   try {
     await invoke("install_update");
     updateOverlayProgressTrack.style.display = "none";
-    updateOverlayText.textContent =
-      t("updateDoneOverlay", update.version) + (update.notes ? `\n\n${update.notes}` : "");
+    updateOverlayText.textContent = t("updateDoneOverlay", update.version);
     showOverlayAction(t("updateRestartNow"), async () => {
       await invoke("restart_app");
     });
