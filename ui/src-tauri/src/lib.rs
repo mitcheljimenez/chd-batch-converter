@@ -140,7 +140,9 @@ async fn check_for_update(
 }
 
 /// Downloads and installs the update this app is currently aware of via a
-/// prior check_for_update call, then restarts the app. Refuses while a
+/// prior check_for_update call. Does NOT restart the app — the caller shows
+/// the release notes first (see UpdateSummary.notes) and then invokes
+/// restart_app once the user has dismissed that dialog. Refuses while a
 /// conversion is in flight (RunState.0 is Some) rather than killing a
 /// possibly hours-long batch job out from under the user — the caller is
 /// expected to retry this on the next check (app start or the manual
@@ -169,6 +171,16 @@ async fn install_update(
         .await
         .map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+/// Restarts the app to apply an update install_update already completed.
+/// Split out from install_update so the frontend can show the release notes
+/// (from the UpdateSummary check_for_update returned) before the process
+/// exits — restarting immediately after install would tear the app down
+/// before that dialog could ever render.
+#[tauri::command]
+fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
 }
 
@@ -356,7 +368,8 @@ pub fn run() {
             start_conversion,
             cancel_conversion,
             check_for_update,
-            install_update
+            install_update,
+            restart_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

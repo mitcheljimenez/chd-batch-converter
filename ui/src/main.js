@@ -9,6 +9,7 @@ const pickFolderBtn = document.getElementById("pick-folder-btn");
 const folderLabel = document.getElementById("folder-label");
 const convertBtn = document.getElementById("convert-btn");
 const cancelBtn = document.getElementById("cancel-btn");
+const progressTrack = document.getElementById("progress-bar-track");
 const progressFill = document.getElementById("progress-bar-fill");
 const discTable = document.getElementById("disc-table");
 
@@ -72,6 +73,7 @@ convertBtn.addEventListener("click", async () => {
     await invoke("start_conversion", { root: currentFolder });
     convertBtn.style.display = "none";
     cancelBtn.style.display = "inline-block";
+    progressTrack.style.display = "block";
   } catch (err) {
     // A real failure (bad chdman path, spawn error) must not lock the button
     // forever — re-enable so the user can fix the setting and retry.
@@ -159,6 +161,17 @@ saveSettingsBtn.addEventListener("click", async () => {
   settingsPanel.style.display = "none";
 });
 
+// Saved on its own, independent of the Guardar button: a checkbox toggle
+// that silently required a separate "Guardar" click to take effect was
+// confusing (it looked applied immediately since the checkbox visually
+// stayed checked, but the persisted config still held the old value).
+autoUpdateCheckbox.addEventListener("change", async () => {
+  await invoke("set_config", {
+    chdmanPath: chdmanPathInput.value,
+    autoUpdateEnabled: autoUpdateCheckbox.checked,
+  });
+});
+
 historyBtn.addEventListener("click", async () => {
   settingsPanel.style.display = "none";
   const isHidden = historyPanel.style.display === "none";
@@ -183,6 +196,25 @@ function showUpdateResult(text) {
   updateStatus.textContent = text;
 }
 
+// Runs install_update, and on success shows the release notes (falling back
+// to a generic line when the release has none) before restarting — restart
+// tears the process down immediately, so the notes must be shown and
+// dismissed first, never after.
+async function installAndShowNotes(update) {
+  showUpdateResult(`Instalando v${update.version}...`);
+  try {
+    await invoke("install_update");
+    alert(
+      update.notes
+        ? `CHD Converter se actualizó a la versión ${update.version}.\n\nNovedades:\n${update.notes}`
+        : `CHD Converter se actualizó a la versión ${update.version}.`
+    );
+    await invoke("restart_app");
+  } catch (err) {
+    showUpdateResult(`No se pudo instalar: ${err}`);
+  }
+}
+
 async function promptAndMaybeInstall(update, { alwaysReport }) {
   if (!update) {
     if (alwaysReport) showUpdateResult("Ya tienes la última versión");
@@ -193,28 +225,13 @@ async function promptAndMaybeInstall(update, { alwaysReport }) {
   const autoUpdateEnabled = config.auto_update_enabled;
 
   if (autoUpdateEnabled) {
-    showUpdateResult(`Instalando v${update.version}...`);
-    try {
-      await invoke("install_update");
-      // install_update restarts the app on success; if we're still here,
-      // it returned an error (e.g. a conversion was running) instead of
-      // throwing, which shouldn't happen given it's a Result — but stay
-      // defensive since the app not restarting would otherwise look like
-      // nothing happened.
-    } catch (err) {
-      showUpdateResult(`No se pudo instalar: ${err}`);
-    }
+    await installAndShowNotes(update);
     return;
   }
 
   const install = confirm(`Hay una actualización disponible (v${update.version}). ¿Instalar ahora?`);
   if (install) {
-    showUpdateResult(`Instalando v${update.version}...`);
-    try {
-      await invoke("install_update");
-    } catch (err) {
-      showUpdateResult(`No se pudo instalar: ${err}`);
-    }
+    await installAndShowNotes(update);
   } else if (alwaysReport) {
     showUpdateResult(`Actualización v${update.version} disponible (Buscar actualizaciones para instalar)`);
   }
