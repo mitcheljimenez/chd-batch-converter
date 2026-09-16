@@ -2,7 +2,7 @@
 
 Desktop UI for `../convertir_a_chd.bat`. Built with Tauri.
 
-**Current version:** 0.1.7
+**Current version:** 0.1.8
 
 ## Install
 

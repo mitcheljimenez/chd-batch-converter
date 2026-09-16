@@ -122,6 +122,18 @@ impl LogTailer {
         let mut combined = std::mem::take(&mut self.partial);
         combined.push_str(&chunk);
 
+        // chdman prints its own progress updates ("Compressing, X% complete...")
+        // separated by a bare '\r' with no '\n' — the same trick a terminal
+        // progress bar uses to overwrite itself in place. Every other line in
+        // this file (the .bat's own log lines, chdman's banner/header lines)
+        // uses a real '\r\n'. Normalizing every '\r' to '\n' here treats both
+        // styles as line terminators uniformly: a real "\r\n" collapses to a
+        // single "\n" (no-op), and a lone '\r' becomes a proper line break so
+        // each progress update is visible as soon as it's written instead of
+        // waiting for the next actual '\n' in the file (which can be an entire
+        // compression pass later).
+        let combined = combined.replace("\r\n", "\n").replace('\r', "\n");
+
         if let Some(last_newline) = combined.rfind('\n') {
             let (complete, rest) = combined.split_at(last_newline + 1);
             let lines = complete.lines().map(|s| s.to_string()).collect();
@@ -264,6 +276,37 @@ mod tests {
         assert_eq!(second, vec!["line two".to_string()]);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn tailer_splits_cr_separated_progress_updates_into_individual_lines() {
+        let dir = std::env::temp_dir().join(format!("chd_tailer_cr_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("conversion_log.txt");
+
+        // Exactly how chdman writes its own progress: real lines end in
+        // "\r\n", but successive progress updates within one file are
+        // separated by a bare "\r" (no "\n") to overwrite a terminal line in
+        // place.
+        let raw = b"Input file:   C:\\Games\\Track.cue\r\nCompressing, 0.0% complete... (ratio=100.0%)  \rCompressing, 6.4% complete... (ratio=97.8%)  \rCompression complete ... final ratio = 60.3%\r\n";
+        fs::write(&log_path, raw).unwrap();
+
+        let mut tailer = LogTailer::new(log_path.clone());
+        let lines = tailer.read_new_lines().unwrap();
+
+        assert_eq!(
+            lines,
+            vec![
+                "Input file:   C:\\Games\\Track.cue".to_string(),
+                "Compressing, 0.0% complete... (ratio=100.0%)  ".to_string(),
+                "Compressing, 6.4% complete... (ratio=97.8%)  ".to_string(),
+                "Compression complete ... final ratio = 60.3%".to_string(),
+            ]
+        );
+        // The offset must still track raw bytes so a follow-up write is seen
+        // exactly once.
+        assert_eq!(tailer.offset, raw.len() as u64);
     }
 
     #[test]
