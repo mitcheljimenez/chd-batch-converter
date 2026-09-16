@@ -11,6 +11,7 @@ let moveChdDestination = null;
 let discs = []; // [{ name, folder, kind, status: "pending"|"ok"|"skip"|"fail", message: "" }]
 
 const pickFolderBtn = document.getElementById("pick-folder-btn");
+const rescanBtn = document.getElementById("rescan-btn");
 const folderLabel = document.getElementById("folder-label");
 const convertBtn = document.getElementById("convert-btn");
 const cancelBtn = document.getElementById("cancel-btn");
@@ -118,6 +119,7 @@ navSettings.addEventListener("click", () => showView("settings"));
 // the user switches languages from the selector.
 function applyTranslations() {
   pickFolderBtn.textContent = t("pickFolder");
+  rescanBtn.textContent = t("rescan");
   folderLabel.textContent = currentFolder ?? t("noFolderSelected");
   convertBtn.textContent = t("convertAll");
   cancelBtn.textContent = t("cancel");
@@ -265,6 +267,15 @@ moveChdOpenDestBtn.addEventListener("click", () => {
   if (moveChdDestination) openPath(moveChdDestination);
 });
 
+async function rescan(root) {
+  const scanned = await invoke("prescan", { root });
+  discs = scanned.map((d) => ({ ...d, status: "pending", message: "" }));
+  renderTable();
+  updateProgress();
+  discsPendingLabel.textContent = t("discsPendingLabel", discs.length);
+  convertBtn.disabled = discs.length === 0;
+}
+
 pickFolderBtn.addEventListener("click", async () => {
   const selected = await open({ directory: true, multiple: false });
   if (!selected) return;
@@ -273,13 +284,14 @@ pickFolderBtn.addEventListener("click", async () => {
   folderLabel.textContent = selected;
   updateOrganizeAvailability();
   updateMoveChdAvailability();
+  rescanBtn.disabled = false;
 
-  const scanned = await invoke("prescan", { root: selected });
-  discs = scanned.map((d) => ({ ...d, status: "pending", message: "" }));
-  renderTable();
-  updateProgress();
-  discsPendingLabel.textContent = t("discsPendingLabel", discs.length);
-  convertBtn.disabled = discs.length === 0;
+  await rescan(selected);
+});
+
+rescanBtn.addEventListener("click", async () => {
+  if (!currentFolder) return;
+  await rescan(currentFolder);
 });
 
 function updateSdCardIdVisibility() {
@@ -328,6 +340,7 @@ convertBtn.addEventListener("click", async () => {
   convertBtn.disabled = true;
   convertBtn.style.display = "none";
   cancelBtn.style.display = "inline-block";
+  rescanBtn.disabled = true;
   progressTrack.style.display = "block";
   progressFill.style.width = "0%";
   try {
@@ -339,6 +352,7 @@ convertBtn.addEventListener("click", async () => {
     convertBtn.disabled = false;
     convertBtn.style.display = "inline-block";
     cancelBtn.style.display = "none";
+    rescanBtn.disabled = false;
     progressTrack.style.display = "none";
     alert(t("conversionStartError", translateError(err)));
   }
@@ -403,6 +417,7 @@ listen("run-finished", (event) => {
   // Re-enable: the click handler disabled it synchronously at run start.
   convertBtn.disabled = discs.length === 0;
   cancelBtn.style.display = "none";
+  rescanBtn.disabled = false;
 });
 
 saveSettingsBtn.addEventListener("click", async () => {
