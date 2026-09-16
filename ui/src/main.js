@@ -13,6 +13,7 @@ const convertBtn = document.getElementById("convert-btn");
 const cancelBtn = document.getElementById("cancel-btn");
 const progressTrack = document.getElementById("progress-bar-track");
 const progressFill = document.getElementById("progress-bar-fill");
+const discsPendingLabel = document.getElementById("discs-pending-label");
 const discTable = document.getElementById("disc-table");
 
 const navConvert = document.getElementById("nav-convert");
@@ -91,6 +92,7 @@ function applyTranslations() {
   languageLabelText.textContent = t("languageLabel");
   saveSettingsBtn.textContent = t("save");
   checkUpdatesBtn.textContent = t("checkUpdates");
+  discsPendingLabel.textContent = t("discsPendingLabel", discs.length);
   organizeExplanation.textContent = t("organizeExplanation");
   storageModePcLabel.textContent = t("storageModePc");
   storageModeInternalLabel.textContent = t("storageModeInternal");
@@ -115,24 +117,58 @@ function renderTable() {
     // "cancel" is a frontend-only status: the backend never emits it, it's
     // applied locally to discs left pending when a run ends cancelled.
     const icon = { pending: "•", ok: "✅", skip: "⏭️", fail: "❌", cancel: "⏹️" }[disc.status];
-    row.append(
-      // disc.status is backend-controlled (not a filesystem/user value), so
-      // it's safe in the className, but disc.name and disc.message come
-      // from real filenames and the .bat's log text — build them via
-      // textContent, never innerHTML, so HTML-like characters in a
-      // filename (e.g. "<img src=x onerror=...>.cue") render as literal
-      // text instead of executing as markup.
+    const main = document.createElement("div");
+    main.className = "disc-row-main";
+    // disc.status is backend-controlled (not a filesystem/user value), so
+    // it's safe in the className, but disc.name and disc.message come
+    // from real filenames and the .bat's log text — build them via
+    // textContent, never innerHTML, so HTML-like characters in a
+    // filename (e.g. "<img src=x onerror=...>.cue") render as literal
+    // text instead of executing as markup.
+    main.append(
       mk(`disc-status-icon status-${disc.status}`, icon),
       mk("disc-name", disc.name),
-      mk("disc-message", disc.message ?? "")
+      mk("disc-message", disc.status === "pending" && disc.progressPercent !== undefined
+        ? t(disc.progressPhase === "verifying" ? "phaseVerifying" : "phaseCompressing", Math.round(disc.progressPercent))
+        : disc.message ?? "")
     );
+    row.appendChild(main);
+
+    if (disc.status === "pending" && disc.progressPercent !== undefined) {
+      const track = document.createElement("div");
+      track.className = "disc-progress-track";
+      const fill = document.createElement("div");
+      fill.className = "disc-progress-fill";
+      fill.style.width = `${Math.round(disc.progressPercent)}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+    }
+
     discTable.appendChild(row);
   }
 }
 
 function updateProgress() {
-  const done = discs.filter((d) => d.status !== "pending").length;
-  const pct = discs.length === 0 ? 0 : Math.round((done / discs.length) * 100);
+  if (discs.length === 0) {
+    progressFill.style.width = "0%";
+    return;
+  }
+  // Smooth overall progress by counting the active file's own live percent
+  // as a fraction of one unit, not just whole finished/pending steps.
+  // Compression is weighted as 70% of a file's work and verification as the
+  // remaining 30% (compression is typically the slower half).
+  let doneUnits = 0;
+  for (const disc of discs) {
+    if (disc.status !== "pending") {
+      doneUnits += 1;
+    } else if (disc.progressPercent !== undefined) {
+      doneUnits +=
+        disc.progressPhase === "verifying"
+          ? 0.7 + (disc.progressPercent / 100) * 0.3
+          : (disc.progressPercent / 100) * 0.7;
+    }
+  }
+  const pct = Math.min(100, Math.round((doneUnits / discs.length) * 100));
   progressFill.style.width = `${pct}%`;
 }
 
@@ -154,12 +190,17 @@ pickFolderBtn.addEventListener("click", async () => {
   discs = scanned.map((d) => ({ ...d, status: "pending", message: "" }));
   renderTable();
   updateProgress();
+  discsPendingLabel.textContent = t("discsPendingLabel", discs.length);
   convertBtn.disabled = discs.length === 0;
 });
 
-storageModeExternalRadio.addEventListener("change", () => {
+function updateSdCardIdVisibility() {
   sdCardIdInput.style.display = storageModeExternalRadio.checked ? "block" : "none";
-});
+}
+
+for (const radio of document.querySelectorAll('input[name="storage-mode"]')) {
+  radio.addEventListener("change", updateSdCardIdVisibility);
+}
 
 runOrganizeBtn.addEventListener("click", async () => {
   if (!currentFolder) return;
@@ -181,20 +222,27 @@ runOrganizeBtn.addEventListener("click", async () => {
 });
 
 convertBtn.addEventListener("click", async () => {
-  // Disable synchronously, BEFORE the await: hiding the button only after
-  // start_conversion resolves leaves a window in which a fast double-click
-  // fires two IPC calls, which the backend then rejects with
-  // CONVERSION_IN_PROGRESS.
+  // Switch to "in progress" UI synchronously, BEFORE the await: hiding the
+  // button only after start_conversion resolves leaves a window in which a
+  // fast double-click fires two IPC calls (which the backend then rejects
+  // with CONVERSION_IN_PROGRESS), and also leaves the click with no visible
+  // feedback until the backend confirms — this gives instant feedback and
+  // real per-file progress fills the bar in as chdman reports it.
   convertBtn.disabled = true;
+  convertBtn.style.display = "none";
+  cancelBtn.style.display = "inline-block";
+  progressTrack.style.display = "block";
+  progressFill.style.width = "0%";
   try {
     await invoke("start_conversion", { root: currentFolder });
-    convertBtn.style.display = "none";
-    cancelBtn.style.display = "inline-block";
-    progressTrack.style.display = "block";
   } catch (err) {
-    // A real failure (bad chdman path, spawn error) must not lock the button
-    // forever — re-enable so the user can fix the setting and retry.
+    // A real failure (bad chdman path, spawn error) must not leave the UI
+    // stuck in "converting" state forever — revert so the user can fix the
+    // setting and retry.
     convertBtn.disabled = false;
+    convertBtn.style.display = "inline-block";
+    cancelBtn.style.display = "none";
+    progressTrack.style.display = "none";
     alert(t("conversionStartError", translateError(err)));
   }
 });
@@ -221,6 +269,17 @@ function matchDiscByPath(path) {
     return normalizedPath === discFull || normalizedPath.endsWith(`/${discFull}`.replace(/\/+/g, "/")) || normalizedPath.endsWith(discFull);
   });
 }
+
+listen("disc-progress", (event) => {
+  const { path, phase, percent } = event.payload;
+  const disc = matchDiscByPath(path);
+  if (disc && disc.status === "pending") {
+    disc.progressPhase = phase;
+    disc.progressPercent = percent;
+    renderTable();
+    updateProgress();
+  }
+});
 
 listen("disc-updated", (event) => {
   const { status, path, message } = event.payload;

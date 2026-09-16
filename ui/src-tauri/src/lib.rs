@@ -289,18 +289,41 @@ fn start_conversion(
         let mut converted = 0u32;
         let mut skipped = 0u32;
         let mut failed = 0u32;
+        // Remembers the most recent "Input file:" line chdman printed, since
+        // its own "Compressing/Verifying, X% complete" progress lines don't
+        // repeat the filename.
+        let mut current_file: Option<String> = None;
+
+        let handle_line = |line: &str,
+                                current_file: &mut Option<String>,
+                                converted: &mut u32,
+                                skipped: &mut u32,
+                                failed: &mut u32| {
+            if let Some(path) = log_tail::parse_input_file_line(line) {
+                *current_file = Some(path);
+                return;
+            }
+            if let Some(cur) = current_file.as_deref() {
+                if let Some(progress) = log_tail::parse_progress_line(line, cur) {
+                    let _ = window.emit("disc-progress", &progress);
+                    return;
+                }
+            }
+            if let Some(event) = parse_log_line(line) {
+                match event.status {
+                    log_tail::DiscStatus::Ok => *converted += 1,
+                    log_tail::DiscStatus::Skip => *skipped += 1,
+                    log_tail::DiscStatus::Fail => *failed += 1,
+                }
+                *current_file = None;
+                let _ = window.emit("disc-updated", &event);
+            }
+        };
 
         loop {
             if let Ok(lines) = tailer.read_new_lines() {
                 for line in lines {
-                    if let Some(event) = parse_log_line(&line) {
-                        match event.status {
-                            log_tail::DiscStatus::Ok => converted += 1,
-                            log_tail::DiscStatus::Skip => skipped += 1,
-                            log_tail::DiscStatus::Fail => failed += 1,
-                        }
-                        let _ = window.emit("disc-updated", &event);
-                    }
+                    handle_line(&line, &mut current_file, &mut converted, &mut skipped, &mut failed);
                 }
             }
 
@@ -326,14 +349,7 @@ fn start_conversion(
                 // between our last read and it exiting.
                 if let Ok(lines) = tailer.read_new_lines() {
                     for line in lines {
-                        if let Some(event) = parse_log_line(&line) {
-                            match event.status {
-                                log_tail::DiscStatus::Ok => converted += 1,
-                                log_tail::DiscStatus::Skip => skipped += 1,
-                                log_tail::DiscStatus::Fail => failed += 1,
-                            }
-                            let _ = window.emit("disc-updated", &event);
-                        }
+                        handle_line(&line, &mut current_file, &mut converted, &mut skipped, &mut failed);
                     }
                 }
                 // The process is gone: clear the shared slot so a later

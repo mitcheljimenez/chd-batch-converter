@@ -16,6 +16,12 @@ const translations = {
     historySummary: ({ converted, skipped, failed }) =>
       `${converted} convertidos, ${skipped} saltados, ${failed} fallidos`,
     conversionStartError: (err) => `No se pudo iniciar la conversión: ${err}`,
+    discsPendingLabel: (n) =>
+      n === 0
+        ? "No hay archivos pendientes de convertir (todos ya tienen su .chd)"
+        : `${n} archivo(s) por convertir`,
+    phaseCompressing: (pct) => `Comprimiendo ${pct}%`,
+    phaseVerifying: (pct) => `Verificando ${pct}%`,
     upToDate: "Ya tienes la última versión",
     installing: (version) => `Instalando v${version}...`,
     updateInstalled: (version, notes) =>
@@ -73,6 +79,12 @@ const translations = {
     historySummary: ({ converted, skipped, failed }) =>
       `${converted} converted, ${skipped} skipped, ${failed} failed`,
     conversionStartError: (err) => `Could not start the conversion: ${err}`,
+    discsPendingLabel: (n) =>
+      n === 0
+        ? "No files pending conversion (all already have a .chd)"
+        : `${n} file(s) to convert`,
+    phaseCompressing: (pct) => `Compressing ${pct}%`,
+    phaseVerifying: (pct) => `Verifying ${pct}%`,
     upToDate: "You already have the latest version",
     installing: (version) => `Installing v${version}...`,
     updateInstalled: (version, notes) =>

@@ -40,6 +40,48 @@ pub fn parse_log_line(line: &str) -> Option<LogEvent> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ProgressEvent {
+    pub path: String,
+    pub phase: String, // "compressing" | "verifying"
+    pub percent: f32,
+}
+
+/// chdman prints "Input file:   <path>" once per disc before its progress
+/// lines, with no filename on the progress lines themselves — so the caller
+/// must remember the last "Input file:" value and pass it back in here.
+pub fn parse_input_file_line(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("Input file:")?;
+    let path = rest.trim();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
+/// Parses chdman's own progress output, e.g.
+/// "Compressing, 42.9% complete... (ratio=51.1%)" or
+/// "Verifying, 71.7% complete...". `current_file` is whatever the most
+/// recent `parse_input_file_line` call returned.
+pub fn parse_progress_line(line: &str, current_file: &str) -> Option<ProgressEvent> {
+    let trimmed = line.trim_start();
+    let (phase, rest) = if let Some(r) = trimmed.strip_prefix("Compressing, ") {
+        ("compressing", r)
+    } else if let Some(r) = trimmed.strip_prefix("Verifying, ") {
+        ("verifying", r)
+    } else {
+        return None;
+    };
+    let percent_str = rest.split('%').next()?;
+    let percent: f32 = percent_str.trim().parse().ok()?;
+    Some(ProgressEvent {
+        path: current_file.to_string(),
+        phase: phase.to_string(),
+        percent,
+    })
+}
+
 pub struct LogTailer {
     pub path: PathBuf,
     pub offset: u64,
@@ -120,6 +162,39 @@ mod tests {
         let line = "Tue 09/15/2026  9:40:02.00 | FAIL  | C:\\Games\\PS1\\Bad.cue | fallo la conversion";
         let event = parse_log_line(line).expect("should parse");
         assert_eq!(event.status, DiscStatus::Fail);
+    }
+
+    #[test]
+    fn parses_input_file_line() {
+        let line = "Input file:   C:\\Games\\PS1\\Track.cue";
+        assert_eq!(
+            parse_input_file_line(line),
+            Some("C:\\Games\\PS1\\Track.cue".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_a_compressing_progress_line() {
+        let line = "Compressing, 42.9% complete... (ratio=51.1%)  ";
+        let event = parse_progress_line(line, "C:\\Games\\Track.cue").expect("should parse");
+        assert_eq!(event.phase, "compressing");
+        assert_eq!(event.path, "C:\\Games\\Track.cue");
+        assert!((event.percent - 42.9).abs() < 0.001);
+    }
+
+    #[test]
+    fn parses_a_verifying_progress_line() {
+        let line = "Verifying, 71.7% complete... ";
+        let event = parse_progress_line(line, "C:\\Games\\Track.cue").expect("should parse");
+        assert_eq!(event.phase, "verifying");
+        assert!((event.percent - 71.7).abs() < 0.001);
+    }
+
+    #[test]
+    fn ignores_unrelated_lines_for_progress_and_input_file() {
+        assert_eq!(parse_input_file_line("Output CHD:   C:\\Games\\Track.chd"), None);
+        assert_eq!(parse_progress_line("chdman - MAME Compressed Hunks of Data (CHD) manager 0.289", "x"), None);
+        assert_eq!(parse_progress_line("Compression complete ... final ratio = 60.3%", "x"), None);
     }
 
     #[test]

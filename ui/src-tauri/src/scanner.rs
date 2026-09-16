@@ -24,8 +24,14 @@ pub fn scan_folder(root: &Path) -> Vec<ScannedDisc> {
         }
     }
 
+    // Same rule convertir_a_chd.bat itself uses to skip a file at conversion
+    // time (an existing <base name>.chd next to it) — applied here too so a
+    // file that's already done never shows up as something to convert.
+    let already_converted = |p: &Path| p.with_extension("chd").exists();
+
     let mut results: Vec<ScannedDisc> = cues
         .iter()
+        .filter(|p| !already_converted(p))
         .map(|p| ScannedDisc {
             name: p.file_name().unwrap().to_string_lossy().to_string(),
             folder: p.parent().unwrap().to_string_lossy().to_string(),
@@ -36,7 +42,7 @@ pub fn scan_folder(root: &Path) -> Vec<ScannedDisc> {
     for iso in &isos {
         let dir = iso.parent().unwrap();
         let has_cue = cues.iter().any(|c| c.parent().unwrap() == dir);
-        if !has_cue {
+        if !has_cue && !already_converted(iso) {
             results.push(ScannedDisc {
                 name: iso.file_name().unwrap().to_string_lossy().to_string(),
                 folder: dir.to_string_lossy().to_string(),
@@ -78,6 +84,25 @@ mod tests {
         assert_eq!(results[1].kind, "cue");
         assert_eq!(results[2].name, "Track.cue");
         assert_eq!(results[2].kind, "cue");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn excludes_cue_and_iso_that_already_have_a_sibling_chd() {
+        let dir = std::env::temp_dir().join(format!("chd_scanner_already_chd_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        write(&dir.join("GameA/Track.cue"), "FILE \"Track.bin\" BINARY\n");
+        write(&dir.join("GameA/Track.chd"), "fake chd");
+        write(&dir.join("GameB/Disc.iso"), "fake iso");
+        write(&dir.join("GameB/Disc.chd"), "fake chd");
+        write(&dir.join("GameC/Other.cue"), "FILE \"Other.bin\" BINARY\n");
+
+        let results = scan_folder(&dir);
+
+        assert_eq!(results.len(), 1, "only GameC's still-pending Other.cue should remain: {:?}", results);
+        assert_eq!(results[0].name, "Other.cue");
 
         fs::remove_dir_all(&dir).unwrap();
     }
