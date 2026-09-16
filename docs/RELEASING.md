@@ -16,7 +16,14 @@
    the `REPLACE_WITH_REAL_PUBKEY_FROM_TAURI_SIGNER_GENERATE` placeholder,
    and commit that change.
 
-2. Add these secrets under the repo's Settings → Secrets and variables →
+2. Make sure `ui/src-tauri/tauri.conf.json`'s `bundle.createUpdaterArtifacts`
+   is set to `true`. Tauri v2 only produces the signed `.sig` files and
+   `latest.json` that the release workflow publishes and the updater
+   endpoint serves when this flag is set — without it, `tauri build`
+   bundles the app normally but silently omits the updater artifacts,
+   and the updater endpoint 404s forever.
+
+3. Add these secrets under the repo's Settings → Secrets and variables →
    Actions:
 
    | Secret | Value |

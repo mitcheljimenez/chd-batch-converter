@@ -189,7 +189,10 @@ async function promptAndMaybeInstall(update, { alwaysReport }) {
     return;
   }
 
-  if (autoUpdateCheckbox.checked) {
+  const config = await invoke("get_config");
+  const autoUpdateEnabled = config.auto_update_enabled;
+
+  if (autoUpdateEnabled) {
     showUpdateResult(`Instalando v${update.version}...`);
     try {
       await invoke("install_update");
@@ -220,7 +223,7 @@ async function promptAndMaybeInstall(update, { alwaysReport }) {
 checkUpdatesBtn.addEventListener("click", async () => {
   showUpdateResult("Buscando...");
   try {
-    const update = await invoke("check_for_update");
+    const update = await invoke("check_for_update", { silent: false });
     await promptAndMaybeInstall(update, { alwaysReport: true });
   } catch (err) {
     showUpdateResult("No se pudo comprobar (sin conexión)");
@@ -229,7 +232,7 @@ checkUpdatesBtn.addEventListener("click", async () => {
 
 (async () => {
   try {
-    const update = await invoke("check_for_update");
+    const update = await invoke("check_for_update", { silent: true });
     await promptAndMaybeInstall(update, { alwaysReport: false });
   } catch {
     // Silent by design: a failed startup check (offline, GitHub down)

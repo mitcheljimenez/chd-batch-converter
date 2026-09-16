@@ -117,7 +117,10 @@ struct UpdateSummary {
 /// from "couldn't check" should inspect the Err case, which this only
 /// produces for a plugin initialization failure, not a network failure.
 #[tauri::command]
-async fn check_for_update(app_handle: tauri::AppHandle) -> Result<Option<UpdateSummary>, String> {
+async fn check_for_update(
+    app_handle: tauri::AppHandle,
+    silent: bool,
+) -> Result<Option<UpdateSummary>, String> {
     let updater = app_handle.updater().map_err(|e| e.to_string())?;
     match updater.check().await {
         Ok(Some(update)) => Ok(Some(UpdateSummary {
@@ -125,7 +128,13 @@ async fn check_for_update(app_handle: tauri::AppHandle) -> Result<Option<UpdateS
             notes: update.body.clone(),
         })),
         Ok(None) => Ok(None),
-        Err(_) => Ok(None),
+        Err(e) => {
+            if silent {
+                Ok(None)
+            } else {
+                Err(e.to_string())
+            }
+        }
     }
 }
 
