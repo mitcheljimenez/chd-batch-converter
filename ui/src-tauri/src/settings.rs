@@ -6,6 +6,8 @@ use std::path::Path;
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
     pub chdman_path: String,
+    #[serde(default)]
+    pub auto_update_enabled: bool,
 }
 
 pub fn load_config(app_dir: &Path) -> Config {
@@ -72,7 +74,10 @@ mod tests {
     #[test]
     fn save_then_load_config_round_trips() {
         let dir = temp_dir("round_trip");
-        let config = Config { chdman_path: "C:\\Tools\\chdman.exe".to_string() };
+        let config = Config {
+            chdman_path: "C:\\Tools\\chdman.exe".to_string(),
+            auto_update_enabled: false,
+        };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
         assert_eq!(loaded.chdman_path, "C:\\Tools\\chdman.exe");
@@ -110,6 +115,27 @@ mod tests {
 
         let loaded = load_history(&dir);
         assert_eq!(loaded, vec![r1, r2]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_config_defaults_auto_update_to_false() {
+        let dir = temp_dir("missing_config_auto_update");
+        let config = load_config(&dir);
+        assert_eq!(config.auto_update_enabled, false);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_then_load_config_round_trips_auto_update_flag() {
+        let dir = temp_dir("round_trip_auto_update");
+        let config = Config {
+            chdman_path: "C:\\Tools\\chdman.exe".to_string(),
+            auto_update_enabled: true,
+        };
+        save_config(&dir, &config).unwrap();
+        let loaded = load_config(&dir);
+        assert_eq!(loaded.auto_update_enabled, true);
         fs::remove_dir_all(&dir).unwrap();
     }
 }
