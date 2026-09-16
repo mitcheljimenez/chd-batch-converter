@@ -111,11 +111,12 @@ struct UpdateSummary {
 
 /// Checks GitHub Releases (via the endpoint configured in
 /// plugins.updater.endpoints in tauri.conf.json) for a newer version than
-/// the one currently running. Returns Ok(None) both when already on the
-/// latest version and when the check itself fails (offline, GitHub
-/// unreachable) — callers that need to distinguish "checked, nothing new"
-/// from "couldn't check" should inspect the Err case, which this only
-/// produces for a plugin initialization failure, not a network failure.
+/// the one currently running. Ok(None) always means "already on the latest
+/// version". When the check itself fails (offline, GitHub unreachable,
+/// plugin init failure), `silent` decides how it's reported: `true`
+/// swallows it into Ok(None) (the app-start check, which must never
+/// interrupt opening the app), `false` surfaces it as Err (the manual
+/// "Buscar actualizaciones" button, which reports failures to the user).
 #[tauri::command]
 async fn check_for_update(
     app_handle: tauri::AppHandle,
