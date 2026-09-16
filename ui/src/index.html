@@ -24,7 +24,15 @@
       <div id="settings-panel" class="panel" style="display:none">
         <label for="chdman-path-input">Ruta de chdman.exe</label>
         <input id="chdman-path-input" type="text" placeholder="C:\Tools\chdman.exe" />
+        <label>
+          <input id="auto-update-checkbox" type="checkbox" />
+          Instalar actualizaciones automáticamente
+        </label>
         <button id="save-settings-btn">Guardar</button>
+        <div class="toolbar">
+          <button id="check-updates-btn" class="secondary">Buscar actualizaciones</button>
+          <span id="update-status"></span>
+        </div>
       </div>
 
       <div id="history-panel" class="panel" style="display:none"></div>
