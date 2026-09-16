@@ -41,8 +41,11 @@ pub fn scan_folder(root: &Path) -> Vec<ScannedDisc> {
 
     for iso in &isos {
         let dir = iso.parent().unwrap();
-        let has_cue = cues.iter().any(|c| c.parent().unwrap() == dir);
-        if !has_cue && !already_converted(iso) {
+        let stem = iso.file_stem();
+        let has_matching_cue = cues
+            .iter()
+            .any(|c| c.parent().unwrap() == dir && c.file_stem() == stem);
+        if !has_matching_cue && !already_converted(iso) {
             results.push(ScannedDisc {
                 name: iso.file_name().unwrap().to_string_lossy().to_string(),
                 folder: dir.to_string_lossy().to_string(),
@@ -65,25 +68,50 @@ mod tests {
     }
 
     #[test]
-    fn finds_cue_and_bare_iso_but_skips_iso_next_to_cue() {
+    fn finds_cue_and_bare_iso_but_skips_iso_with_matching_cue_name() {
         let dir = std::env::temp_dir().join(format!("chd_scanner_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
 
         write(&dir.join("GameA/Track.cue"), "FILE \"Track.bin\" BINARY\n");
         write(&dir.join("GameB/Disc.iso"), "fake iso");
         write(&dir.join("GameC/Disc.iso"), "fake iso");
-        write(&dir.join("GameC/Other.cue"), "FILE \"Other.bin\" BINARY\n");
+        write(&dir.join("GameC/Disc.cue"), "FILE \"Disc.bin\" BINARY\n");
 
         let mut results = scan_folder(&dir);
         results.sort_by(|a, b| a.name.cmp(&b.name));
 
-        assert_eq!(results.len(), 3, "GameC's Disc.iso must be excluded: {:?}", results);
+        assert_eq!(results.len(), 3, "GameC's Disc.iso must be excluded (same base name as Disc.cue): {:?}", results);
+        assert_eq!(results[0].name, "Disc.cue");
+        assert_eq!(results[0].kind, "cue");
+        assert_eq!(results[1].name, "Disc.iso");
+        assert_eq!(results[1].kind, "iso");
+        assert_eq!(results[2].name, "Track.cue");
+        assert_eq!(results[2].kind, "cue");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn converts_iso_sharing_a_flat_folder_with_an_unrelated_cue() {
+        // Regression test: a flat folder mixing a PS1 game (.cue) and a
+        // PS2 game (.iso) with different base names must not suppress the
+        // .iso just because some .cue exists in the same directory — only
+        // a same-named .cue (i.e. the same game already ripped as cue/bin)
+        // should suppress it.
+        let dir = std::env::temp_dir().join(format!("chd_scanner_flat_mixed_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        write(&dir.join("Other.cue"), "FILE \"Other.bin\" BINARY\n");
+        write(&dir.join("Disc.iso"), "fake iso");
+
+        let mut results = scan_folder(&dir);
+        results.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(results.len(), 2, "unrelated cue must not suppress the iso: {:?}", results);
         assert_eq!(results[0].name, "Disc.iso");
         assert_eq!(results[0].kind, "iso");
         assert_eq!(results[1].name, "Other.cue");
         assert_eq!(results[1].kind, "cue");
-        assert_eq!(results[2].name, "Track.cue");
-        assert_eq!(results[2].kind, "cue");
 
         fs::remove_dir_all(&dir).unwrap();
     }

@@ -8,6 +8,17 @@
   </head>
 
   <body>
+    <div id="update-overlay" style="display:none">
+      <div id="update-overlay-card">
+        <img id="update-overlay-logo" src="/assets/app-icon.png" alt="" />
+        <div id="update-overlay-spinner"></div>
+        <p id="update-overlay-text"></p>
+        <div id="update-overlay-progress-track" style="display:none">
+          <div id="update-overlay-progress-fill"></div>
+        </div>
+        <button id="update-overlay-action-btn" style="display:none"></button>
+      </div>
+    </div>
     <div id="app">
       <div id="top-bar" class="toolbar">
         <button id="pick-folder-btn">Elegir carpeta</button>
@@ -18,6 +29,7 @@
         <nav id="sidebar">
           <button id="nav-convert" class="nav-item active">Convertir</button>
           <button id="nav-organize" class="nav-item">Organizar multi-disco</button>
+          <button id="nav-move-chd" class="nav-item">Mover .chd</button>
           <button id="nav-history" class="nav-item">Historial</button>
           <button id="nav-settings" class="nav-item">Configuración</button>
         </nav>
@@ -36,6 +48,10 @@
           <section id="organize-view" class="view panel-view" style="display:none">
             <p id="organize-explanation">Esto va a mover los archivos de juegos multi-disco (Disc 1, Disc 2, etc.) a carpetas separadas y crear un .m3u para cada uno.</p>
             <p id="organize-no-folder-hint">Elegí una carpeta primero.</p>
+            <div class="toolbar">
+              <button id="organize-pick-dest-btn" class="secondary">Elegir carpeta destino</button>
+              <span id="organize-dest-label">Ninguna carpeta destino seleccionada</span>
+            </div>
             <label>
               <input type="radio" name="storage-mode" id="storage-mode-pc" value="pc" checked />
               <span id="storage-mode-pc-label">Solo PC (rutas relativas)</span>
@@ -51,6 +67,16 @@
             </label>
             <input id="sd-card-id-input" type="text" placeholder="ej. 1234-5678" style="display:none" />
             <button id="run-organize-btn" disabled>Organizar</button>
+          </section>
+
+          <section id="move-chd-view" class="view panel-view" style="display:none">
+            <p id="move-chd-explanation">Esto va a buscar todos los archivos .chd, incluso en subcarpetas anidadas, y moverlos a la carpeta destino, separándolos de sus .bin/.cue/.iso originales (que quedan donde estaban).</p>
+            <p id="move-chd-no-folder-hint">Elegí una carpeta de origen y una de destino primero.</p>
+            <div class="toolbar">
+              <button id="move-chd-pick-dest-btn" class="secondary">Elegir carpeta destino</button>
+              <span id="move-chd-dest-label">Ninguna carpeta destino seleccionada</span>
+            </div>
+            <button id="run-move-chd-btn" disabled>Mover</button>
           </section>
 
           <section id="history-view" class="view panel-view" style="display:none">

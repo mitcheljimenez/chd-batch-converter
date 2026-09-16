@@ -5,6 +5,8 @@ const { open } = window.__TAURI__.dialog;
 const { listen } = window.__TAURI__.event;
 
 let currentFolder = null;
+let organizeDestination = null;
+let moveChdDestination = null;
 let discs = []; // [{ name, folder, kind, status: "pending"|"ok"|"skip"|"fail", message: "" }]
 
 const pickFolderBtn = document.getElementById("pick-folder-btn");
@@ -18,10 +20,12 @@ const discTable = document.getElementById("disc-table");
 
 const navConvert = document.getElementById("nav-convert");
 const navOrganize = document.getElementById("nav-organize");
+const navMoveChd = document.getElementById("nav-move-chd");
 const navHistory = document.getElementById("nav-history");
 const navSettings = document.getElementById("nav-settings");
 const convertView = document.getElementById("convert-view");
 const organizeView = document.getElementById("organize-view");
+const moveChdView = document.getElementById("move-chd-view");
 const historyView = document.getElementById("history-view");
 const settingsView = document.getElementById("settings-view");
 
@@ -38,6 +42,13 @@ const storageModeExternalTooltip = document.getElementById("storage-mode-externa
 const storageModeExternalRadio = document.getElementById("storage-mode-external");
 const sdCardIdInput = document.getElementById("sd-card-id-input");
 const runOrganizeBtn = document.getElementById("run-organize-btn");
+const organizePickDestBtn = document.getElementById("organize-pick-dest-btn");
+const organizeDestLabel = document.getElementById("organize-dest-label");
+const moveChdExplanation = document.getElementById("move-chd-explanation");
+const moveChdNoFolderHint = document.getElementById("move-chd-no-folder-hint");
+const moveChdPickDestBtn = document.getElementById("move-chd-pick-dest-btn");
+const moveChdDestLabel = document.getElementById("move-chd-dest-label");
+const runMoveChdBtn = document.getElementById("run-move-chd-btn");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
 const languageLabelText = document.getElementById("language-label-text");
@@ -45,8 +56,26 @@ const languageSelect = document.getElementById("language-select");
 const checkUpdatesBtn = document.getElementById("check-updates-btn");
 const updateStatus = document.getElementById("update-status");
 
-const views = { convert: convertView, organize: organizeView, history: historyView, settings: settingsView };
-const navButtons = { convert: navConvert, organize: navOrganize, history: navHistory, settings: navSettings };
+const updateOverlay = document.getElementById("update-overlay");
+const updateOverlayText = document.getElementById("update-overlay-text");
+const updateOverlayProgressTrack = document.getElementById("update-overlay-progress-track");
+const updateOverlayProgressFill = document.getElementById("update-overlay-progress-fill");
+const updateOverlayActionBtn = document.getElementById("update-overlay-action-btn");
+
+const views = {
+  convert: convertView,
+  organize: organizeView,
+  moveChd: moveChdView,
+  history: historyView,
+  settings: settingsView,
+};
+const navButtons = {
+  convert: navConvert,
+  organize: navOrganize,
+  moveChd: navMoveChd,
+  history: navHistory,
+  settings: navSettings,
+};
 
 // Switches the visible section and highlights its sidebar entry. History
 // and Settings need to refresh from backend state every time they're
@@ -67,11 +96,14 @@ async function showView(name) {
     await renderHistory();
   } else if (name === "organize") {
     updateOrganizeAvailability();
+  } else if (name === "moveChd") {
+    updateMoveChdAvailability();
   }
 }
 
 navConvert.addEventListener("click", () => showView("convert"));
 navOrganize.addEventListener("click", () => showView("organize"));
+navMoveChd.addEventListener("click", () => showView("moveChd"));
 navHistory.addEventListener("click", () => showView("history"));
 navSettings.addEventListener("click", () => showView("settings"));
 
@@ -100,6 +132,14 @@ function applyTranslations() {
   storageModeExternalTooltip.title = t("storageExternalTooltip");
   sdCardIdInput.placeholder = t("sdCardIdPlaceholder");
   runOrganizeBtn.textContent = t("runOrganize");
+  organizePickDestBtn.textContent = t("pickDestination");
+  organizeDestLabel.textContent = organizeDestination ?? t("noDestinationSelected");
+  navMoveChd.textContent = t("navMoveChd");
+  moveChdExplanation.textContent = t("moveChdExplanation");
+  moveChdNoFolderHint.textContent = t("moveChdNoFolderHint");
+  moveChdPickDestBtn.textContent = t("pickDestination");
+  moveChdDestLabel.textContent = moveChdDestination ?? t("noDestinationSelected");
+  runMoveChdBtn.textContent = t("runMoveChd");
 }
 
 function mk(cls, text) {
@@ -173,10 +213,42 @@ function updateProgress() {
 }
 
 function updateOrganizeAvailability() {
-  const hasFolder = Boolean(currentFolder);
+  const hasFolder = Boolean(currentFolder) && Boolean(organizeDestination);
   organizeNoFolderHint.style.display = hasFolder ? "none" : "block";
   runOrganizeBtn.disabled = !hasFolder;
 }
+
+function updateMoveChdAvailability() {
+  const hasFolders = Boolean(currentFolder) && Boolean(moveChdDestination);
+  moveChdNoFolderHint.style.display = hasFolders ? "none" : "block";
+  runMoveChdBtn.disabled = !hasFolders;
+}
+
+organizePickDestBtn.addEventListener("click", async () => {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected) return;
+  organizeDestination = selected;
+  organizeDestLabel.textContent = selected;
+  updateOrganizeAvailability();
+});
+
+moveChdPickDestBtn.addEventListener("click", async () => {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected) return;
+  moveChdDestination = selected;
+  moveChdDestLabel.textContent = selected;
+  updateMoveChdAvailability();
+});
+
+runMoveChdBtn.addEventListener("click", async () => {
+  if (!currentFolder || !moveChdDestination) return;
+  try {
+    const summary = await invoke("move_chd_files", { root: currentFolder, destination: moveChdDestination });
+    alert(t("moveChdSummary", summary));
+  } catch (err) {
+    alert(t("moveChdFailed", translateError(err)));
+  }
+});
 
 pickFolderBtn.addEventListener("click", async () => {
   const selected = await open({ directory: true, multiple: false });
@@ -185,6 +257,7 @@ pickFolderBtn.addEventListener("click", async () => {
   currentFolder = selected;
   folderLabel.textContent = selected;
   updateOrganizeAvailability();
+  updateMoveChdAvailability();
 
   const scanned = await invoke("prescan", { root: selected });
   discs = scanned.map((d) => ({ ...d, status: "pending", message: "" }));
@@ -203,7 +276,7 @@ for (const radio of document.querySelectorAll('input[name="storage-mode"]')) {
 }
 
 runOrganizeBtn.addEventListener("click", async () => {
-  if (!currentFolder) return;
+  if (!currentFolder || !organizeDestination) return;
 
   const mode = document.querySelector('input[name="storage-mode"]:checked')?.value ?? "pc";
   let androidBase = null;
@@ -214,7 +287,11 @@ runOrganizeBtn.addEventListener("click", async () => {
   }
 
   try {
-    const summary = await invoke("organize_multidisc", { root: currentFolder, androidBase });
+    const summary = await invoke("organize_multidisc", {
+      root: currentFolder,
+      destination: organizeDestination,
+      androidBase,
+    });
     alert(t("organizeSummary", summary));
   } catch (err) {
     alert(t("organizeFailed", translateError(err)));
@@ -360,18 +437,58 @@ function showUpdateResult(text) {
   updateStatus.textContent = text;
 }
 
-// Runs install_update, and on success shows the release notes (falling back
-// to a generic line when the release has none) before restarting — restart
-// tears the process down immediately, so the notes must be shown and
-// dismissed first, never after.
-async function installAndShowNotes(update) {
-  showUpdateResult(t("installing", update.version));
+// Set while the update overlay is driving an actual install, so the
+// download-progress listener (which fires for the whole app's lifetime)
+// knows whether to touch the overlay at all, and what version's text to show.
+let overlayInstallVersion = null;
+
+function showOverlayAction(text, onClick) {
+  updateOverlayActionBtn.style.display = "inline-block";
+  updateOverlayActionBtn.textContent = text;
+  updateOverlayActionBtn.onclick = onClick;
+}
+
+// Real download-progress events from the backend (chunk counts as
+// download_and_install streams the update) drive the bar here instead of it
+// being an indeterminate spinner for however many seconds the download takes.
+listen("update-download-progress", (event) => {
+  if (!overlayInstallVersion) return;
+  const { downloaded, total } = event.payload;
+  if (!total) return;
+  const pct = Math.min(100, Math.round((downloaded / total) * 100));
+  updateOverlayProgressTrack.style.display = "block";
+  updateOverlayProgressFill.style.width = `${pct}%`;
+  updateOverlayText.textContent = t("updateDownloading", overlayInstallVersion, pct);
+});
+
+// Covers the whole window with a small "installing" card (logo, spinner,
+// progress bar) for the entire download+install, instead of the previous
+// silent-then-alert flow — the underlying app is never visible or usable
+// while an install is in flight, since a successful one ends in an
+// immediate restart.
+async function installWithOverlay(update) {
+  overlayInstallVersion = update.version;
+  updateOverlay.style.display = "flex";
+  updateOverlayActionBtn.style.display = "none";
+  updateOverlayProgressTrack.style.display = "none";
+  updateOverlayProgressFill.style.width = "0%";
+  updateOverlayText.textContent = t("updateNoticeAuto", update.version);
+
   try {
     await invoke("install_update");
-    alert(t("updateInstalled", update.version, update.notes));
-    await invoke("restart_app");
+    updateOverlayProgressTrack.style.display = "none";
+    updateOverlayText.textContent =
+      t("updateDoneOverlay", update.version) + (update.notes ? `\n\n${update.notes}` : "");
+    showOverlayAction(t("updateRestartNow"), async () => {
+      await invoke("restart_app");
+    });
   } catch (err) {
-    showUpdateResult(t("installFailed", translateError(err)));
+    updateOverlayProgressTrack.style.display = "none";
+    updateOverlayText.textContent = t("updateErrorOverlay", translateError(err));
+    showOverlayAction(t("updateDismiss"), () => {
+      overlayInstallVersion = null;
+      updateOverlay.style.display = "none";
+    });
   }
 }
 
@@ -385,13 +502,13 @@ async function promptAndMaybeInstall(update, { alwaysReport }) {
   const autoUpdateEnabled = config.auto_update_enabled;
 
   if (autoUpdateEnabled) {
-    await installAndShowNotes(update);
+    await installWithOverlay(update);
     return;
   }
 
   const install = confirm(t("confirmInstall", update.version));
   if (install) {
-    await installAndShowNotes(update);
+    await installWithOverlay(update);
   } else if (alwaysReport) {
     showUpdateResult(t("updateAvailableDeferred", update.version));
   }
@@ -428,4 +545,5 @@ checkUpdatesBtn.addEventListener("click", async () => {
   autoUpdateCheckbox.checked = config.auto_update_enabled;
   chdmanPathInput.value = config.chdman_path;
   updateOrganizeAvailability();
+  updateMoveChdAvailability();
 })();

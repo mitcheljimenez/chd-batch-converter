@@ -18,8 +18,9 @@ generated file.
 
 - Recursively walks every subfolder (and the root folder itself).
 - `.cue` → converted with `chdman createcd`.
-- `.iso` (only if there's no `.cue` in that same folder) → converted with
-  `chdman createdvd`.
+- `.iso` (only if there's no same-named `.cue` next to it, i.e. the same game
+  isn't already available as cue/bin) → converted with `chdman createdvd`. An
+  unrelated `.cue` for a different game in the same folder does not block it.
 - The resulting `.chd` is written next to the original file.
 - If the `.chd` already exists, that conversion is skipped (so the script
   can be re-run without repeating work).

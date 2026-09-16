@@ -9,3 +9,5 @@ tests/fixtures/**/*.chd
 !tests/fixtures/cue_skip/game/Track.chd
 !tests/fixtures/nested_multidisc/Sub/GameB/Track.chd
 tests/fixtures/**/conversion_log.txt
+# CocoIndex Code (ccc)
+/.cocoindex_code/

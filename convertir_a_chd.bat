@@ -42,11 +42,13 @@ for /r "%ROOT%" %%F in (*.cue) do (
     call :process_disc "%%~fF" "%%~dpF" "%%~nF" createcd
 )
 
+rem Only skip an .iso when a .cue with the SAME base name sits next to it --
+rem the same game, already available as cue/bin -- not merely because some
+rem unrelated .cue exists in the same folder. A flat folder that mixes a PS1
+rem game (.cue) with a PS2 game (.iso) must still convert the .iso.
 for /r "%ROOT%" %%F in (*.iso) do (
-    set "HASCUE="
-    for %%C in ("%%~dpF*.cue") do set "HASCUE=1"
-    if defined HASCUE (
-        call :log "SKIP  | %%~fF | .iso ignorado: hay un .cue en la misma carpeta"
+    if exist "%%~dpF%%~nF.cue" (
+        call :log "SKIP  | %%~fF | .iso ignorado: existe %%~nF.cue (mismo juego)"
         set /a COUNT_SKIPPED+=1
     ) else (
         call :process_disc "%%~fF" "%%~dpF" "%%~nF" createdvd

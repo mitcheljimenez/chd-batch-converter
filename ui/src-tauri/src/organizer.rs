@@ -87,9 +87,17 @@ struct Candidate {
 }
 
 /// Recursively finds multi-disc game files under `root` and groups each
-/// game's discs into its own "<Game>.m3u/" folder alongside an ".m3u"
-/// playlist listing them in disc order — matching the layout ES-DE expects
-/// for multi-disc entries.
+/// game's discs into its own "<Game>.m3u/" folder (created directly under
+/// `destination`, never inside wherever the discs happened to be nested
+/// under `root`) alongside an ".m3u" playlist listing them in disc order —
+/// matching the layout ES-DE expects for multi-disc entries.
+///
+/// `destination` is always flattened to one level: every "<Game>.m3u/"
+/// folder lands directly under it, regardless of how deep the source discs
+/// were nested under `root`. Games used to be organized in place (next to
+/// wherever their discs were found), which meant re-running against a large,
+/// deeply-nested collection scattered dozens of ".m3u" folders throughout the
+/// tree instead of one place the user can point ES-DE at.
 ///
 /// Runs in two passes (scan everything, then move) rather than moving files
 /// while still walking the tree: the original project's `for /r` walk
@@ -97,13 +105,20 @@ struct Candidate {
 /// moving files mid-walk), which is exactly the kind of thing that produces
 /// inconsistent results on deeply nested folder structures. Two passes make
 /// that class of bug impossible here.
-pub fn organize_multidisc(root: &Path, android_base: Option<&str>) -> Result<OrganizeSummary, String> {
+pub fn organize_multidisc(root: &Path, destination: &Path, android_base: Option<&str>) -> Result<OrganizeSummary, String> {
+    fs::create_dir_all(destination).map_err(|e| e.to_string())?;
+
     let mut groups: HashMap<(PathBuf, String), Vec<Candidate>> = HashMap::new();
 
     let walker = WalkDir::new(root).into_iter().filter_entry(|entry| {
         // Never descend into a folder we (or a previous run) already
         // organized — reprocessing it would try to move its files into
-        // themselves and corrupt the playlist.
+        // themselves and corrupt the playlist. When `destination` sits
+        // inside `root`, this is also what keeps a later re-run from ever
+        // re-scanning what a prior run already moved there: `destination`
+        // itself holds nothing but "<Game>.m3u" folders, which this filter
+        // skips, and it's created (empty) before the scan below even starts,
+        // so the very first run never sees loose files inside it either.
         !entry
             .file_name()
             .to_str()
@@ -144,8 +159,13 @@ pub fn organize_multidisc(root: &Path, android_base: Option<&str>) -> Result<Org
 
     let mut summary = OrganizeSummary::default();
 
-    for ((parent, base_name), mut candidates) in groups {
-        let game_folder = parent.join(format!("{}.m3u", base_name));
+    for ((_parent, base_name), mut candidates) in groups {
+        // Flattened: always directly under `destination`, never nested under
+        // wherever the source discs lived under `root`. Two different source
+        // folders producing the same base name (rare) land on the same
+        // target and the second is safely counted as already-organized
+        // below, rather than risking any cross-game clobbering.
+        let game_folder = destination.join(format!("{}.m3u", base_name));
         if game_folder.exists() {
             summary.skipped_already_organized += 1;
             continue;
@@ -155,21 +175,16 @@ pub fn organize_multidisc(root: &Path, android_base: Option<&str>) -> Result<Org
 
         fs::create_dir_all(&game_folder).map_err(|e| e.to_string())?;
 
-        // Only computed when needed: the path of the game's own folder
-        // relative to the scanned root, with forward slashes, for building
-        // an absolute Android path below. Generalizes the original
-        // project's assumption of a single fixed "ROMs/<system>/" depth to
-        // whatever folder structure the user actually has.
-        let relative_game_folder = game_folder
-            .strip_prefix(root)
-            .unwrap_or(&game_folder)
-            .to_string_lossy()
-            .replace('\\', "/");
+        // Only computed when needed, for building an absolute Android path
+        // below. With output always flattened to one level under
+        // `destination`, this is just the game's own folder name — no
+        // intermediate nesting to account for.
+        let relative_game_folder = format!("{}.m3u", base_name);
 
         let mut playlist_lines = Vec::with_capacity(candidates.len());
         for candidate in &candidates {
-            let destination = game_folder.join(&candidate.file_name);
-            fs::rename(&candidate.path, &destination).map_err(|e| e.to_string())?;
+            let dest_path = game_folder.join(&candidate.file_name);
+            fs::rename(&candidate.path, &dest_path).map_err(|e| e.to_string())?;
 
             // Matches the original project's compatibility finding: Dolphin
             // (GameCube/Wii, .rvz) needs an absolute Android path to detect
@@ -247,47 +262,54 @@ mod tests {
     }
 
     #[test]
-    fn groups_and_moves_discs_from_a_deeply_nested_folder() {
+    fn groups_and_moves_discs_from_a_deeply_nested_folder_flattened_into_destination() {
         let root = temp_dir("nested");
+        let destination = temp_dir("nested_dest");
         let nested = root.join("psx").join("collection").join("subfolder");
         fs::create_dir_all(&nested).unwrap();
         fs::write(nested.join("Chrono Cross (Disc 1).chd"), b"disc1").unwrap();
         fs::write(nested.join("Chrono Cross (Disc 2).chd"), b"disc2").unwrap();
 
-        let summary = organize_multidisc(&root, None).unwrap();
+        let summary = organize_multidisc(&root, &destination, None).unwrap();
 
         assert_eq!(summary.games_organized, 1);
         assert_eq!(summary.files_moved, 2);
 
-        let game_folder = nested.join("Chrono Cross.m3u");
+        // Lands directly under `destination`, not nested under
+        // psx/collection/subfolder the way it was found under `root`.
+        let game_folder = destination.join("Chrono Cross.m3u");
         assert!(game_folder.join("Chrono Cross (Disc 1).chd").exists());
         assert!(game_folder.join("Chrono Cross (Disc 2).chd").exists());
+        assert!(!nested.join("Chrono Cross (Disc 1).chd").exists());
 
         let playlist = fs::read_to_string(game_folder.join("Chrono Cross.m3u")).unwrap();
         assert_eq!(playlist, "Chrono Cross (Disc 1).chd\nChrono Cross (Disc 2).chd\n");
         assert!(!playlist.contains('\r'));
 
         fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&destination).unwrap();
     }
 
     #[test]
     fn does_not_reprocess_an_already_organized_game_folder() {
         let root = temp_dir("idempotent");
+        let destination = temp_dir("idempotent_dest");
         fs::write(root.join("Game (Disc 1).chd"), b"disc1").unwrap();
         fs::write(root.join("Game (Disc 2).chd"), b"disc2").unwrap();
 
-        let first = organize_multidisc(&root, None).unwrap();
+        let first = organize_multidisc(&root, &destination, None).unwrap();
         assert_eq!(first.games_organized, 1);
 
         // Simulate leftover loose files with the same base name after a
         // first run — a re-run must not try to fold them into the folder
         // that already exists, and must not error out either.
         fs::write(root.join("Game (Disc 3).chd"), b"disc3").unwrap();
-        let second = organize_multidisc(&root, None).unwrap();
+        let second = organize_multidisc(&root, &destination, None).unwrap();
         assert_eq!(second.games_organized, 0);
         assert_eq!(second.skipped_already_organized, 1);
 
         fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&destination).unwrap();
     }
 
     #[test]
@@ -296,48 +318,75 @@ mod tests {
         // too, since it starts with "Game" — a real risk with sequels or
         // bonus-disc files that share a prefix but aren't part of the set.
         let root = temp_dir("prefix_safety");
+        let destination = temp_dir("prefix_safety_dest");
         fs::write(root.join("Game (Disc 1).chd"), b"disc1").unwrap();
         fs::write(root.join("Game Extras.chd"), b"not a disc").unwrap();
 
-        organize_multidisc(&root, None).unwrap();
+        organize_multidisc(&root, &destination, None).unwrap();
 
         assert!(root.join("Game Extras.chd").exists());
         fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&destination).unwrap();
     }
 
     #[test]
     fn uses_absolute_android_path_for_rvz_when_a_base_is_given() {
         let root = temp_dir("android_rvz");
+        let destination = temp_dir("android_rvz_dest");
         let nested = root.join("gc");
         fs::create_dir_all(&nested).unwrap();
         fs::write(nested.join("Resident Evil (Disc 1).rvz"), b"disc1").unwrap();
         fs::write(nested.join("Resident Evil (Disc 2).rvz"), b"disc2").unwrap();
 
-        organize_multidisc(&root, Some("/storage/emulated/0/ROMs")).unwrap();
+        organize_multidisc(&root, &destination, Some("/storage/emulated/0/ROMs")).unwrap();
 
         let playlist = fs::read_to_string(
-            nested.join("Resident Evil.m3u").join("Resident Evil.m3u"),
+            destination.join("Resident Evil.m3u").join("Resident Evil.m3u"),
         )
         .unwrap();
+        // Flattened: the android path is just the game's own folder name,
+        // not the "gc" subfolder it used to live under before flattening.
         assert_eq!(
             playlist,
-            "/storage/emulated/0/ROMs/gc/Resident Evil.m3u/Resident Evil (Disc 1).rvz\n\
-             /storage/emulated/0/ROMs/gc/Resident Evil.m3u/Resident Evil (Disc 2).rvz\n"
+            "/storage/emulated/0/ROMs/Resident Evil.m3u/Resident Evil (Disc 1).rvz\n\
+             /storage/emulated/0/ROMs/Resident Evil.m3u/Resident Evil (Disc 2).rvz\n"
         );
 
         fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&destination).unwrap();
     }
 
     #[test]
     fn keeps_relative_paths_for_non_rvz_even_with_an_android_base() {
         let root = temp_dir("android_relative");
+        let destination = temp_dir("android_relative_dest");
         fs::write(root.join("Game (Disc 1).chd"), b"disc1").unwrap();
         fs::write(root.join("Game (Disc 2).chd"), b"disc2").unwrap();
 
-        organize_multidisc(&root, Some("/storage/emulated/0/ROMs")).unwrap();
+        organize_multidisc(&root, &destination, Some("/storage/emulated/0/ROMs")).unwrap();
 
-        let playlist = fs::read_to_string(root.join("Game.m3u").join("Game.m3u")).unwrap();
+        let playlist = fs::read_to_string(destination.join("Game.m3u").join("Game.m3u")).unwrap();
         assert_eq!(playlist, "Game (Disc 1).chd\nGame (Disc 2).chd\n");
+
+        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&destination).unwrap();
+    }
+
+    #[test]
+    fn destination_can_be_a_subfolder_of_root_without_recursing_into_itself() {
+        // A common real choice: organize output goes into "<root>/Organized".
+        // The walker must not descend into that folder mid-walk and treat
+        // freshly-moved files as new candidates to move again.
+        let root = temp_dir("dest_inside_root");
+        let destination = root.join("Organized");
+        fs::write(root.join("Game (Disc 1).chd"), b"disc1").unwrap();
+        fs::write(root.join("Game (Disc 2).chd"), b"disc2").unwrap();
+
+        let summary = organize_multidisc(&root, &destination, None).unwrap();
+
+        assert_eq!(summary.games_organized, 1);
+        assert_eq!(summary.files_moved, 2);
+        assert!(destination.join("Game.m3u").join("Game (Disc 1).chd").exists());
 
         fs::remove_dir_all(&root).unwrap();
     }

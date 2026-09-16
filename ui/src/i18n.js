@@ -23,12 +23,6 @@ const translations = {
     phaseCompressing: (pct) => `Comprimiendo ${pct}%`,
     phaseVerifying: (pct) => `Verificando ${pct}%`,
     upToDate: "Ya tienes la última versión",
-    installing: (version) => `Instalando v${version}...`,
-    updateInstalled: (version, notes) =>
-      notes
-        ? `CHD Converter se actualizó a la versión ${version}.\n\nNovedades:\n${notes}`
-        : `CHD Converter se actualizó a la versión ${version}.`,
-    installFailed: (err) => `No se pudo instalar: ${err}`,
     confirmInstall: (version) =>
       `Hay una actualización disponible (v${version}). ¿Instalar ahora?`,
     updateAvailableDeferred: (version) =>
@@ -51,6 +45,27 @@ const translations = {
         ? `. ${skipped_already_organized} ya estaban organizados y se dejaron como estaban.`
         : "."),
     organizeFailed: (err) => `No se pudo organizar: ${err}`,
+    pickDestination: "Elegir carpeta destino",
+    noDestinationSelected: "Ninguna carpeta destino seleccionada",
+    navMoveChd: "Mover .chd",
+    moveChdExplanation:
+      "Esto va a buscar todos los archivos .chd, incluso en subcarpetas anidadas, y moverlos a la carpeta destino, separándolos de sus .bin/.cue/.iso originales (que quedan donde estaban).",
+    moveChdNoFolderHint: "Elegí una carpeta de origen y una de destino primero.",
+    runMoveChd: "Mover",
+    moveChdSummary: ({ files_moved, renamed_due_to_collision }) =>
+      `Listo: ${files_moved} archivo(s) .chd movido(s)` +
+      (renamed_due_to_collision > 0
+        ? `. ${renamed_due_to_collision} se renombraron para no sobrescribir un archivo existente con el mismo nombre.`
+        : "."),
+    moveChdFailed: (err) => `No se pudo mover: ${err}`,
+    updateNoticeAuto: (version) =>
+      `Hay una actualización disponible (v${version}). Se va a instalar automáticamente.`,
+    updateDownloading: (version, pct) => `Descargando actualización v${version}... ${pct}%`,
+    updateInstallingOverlay: "Instalando...",
+    updateDoneOverlay: (version) => `¡Listo! Se actualizó a la versión ${version}.`,
+    updateRestartNow: "Reiniciar ahora",
+    updateErrorOverlay: (err) => `No se pudo actualizar: ${err}`,
+    updateDismiss: "Cerrar",
     errors: {
       CHDMAN_NOT_CONFIGURED: "No se configuró la ruta de chdman.exe",
       CHDMAN_NOT_FOUND: (path) =>
@@ -86,12 +101,6 @@ const translations = {
     phaseCompressing: (pct) => `Compressing ${pct}%`,
     phaseVerifying: (pct) => `Verifying ${pct}%`,
     upToDate: "You already have the latest version",
-    installing: (version) => `Installing v${version}...`,
-    updateInstalled: (version, notes) =>
-      notes
-        ? `CHD Converter was updated to version ${version}.\n\nWhat's new:\n${notes}`
-        : `CHD Converter was updated to version ${version}.`,
-    installFailed: (err) => `Could not install: ${err}`,
     confirmInstall: (version) =>
       `An update is available (v${version}). Install now?`,
     updateAvailableDeferred: (version) =>
@@ -114,6 +123,27 @@ const translations = {
         ? `. ${skipped_already_organized} were already organized and left as-is.`
         : "."),
     organizeFailed: (err) => `Could not organize: ${err}`,
+    pickDestination: "Choose destination folder",
+    noDestinationSelected: "No destination folder selected",
+    navMoveChd: "Move .chd files",
+    moveChdExplanation:
+      "This will find every .chd file, even in nested subfolders, and move it into the destination folder, separating it from its original .bin/.cue/.iso (which stay where they were).",
+    moveChdNoFolderHint: "Choose a source folder and a destination folder first.",
+    runMoveChd: "Move",
+    moveChdSummary: ({ files_moved, renamed_due_to_collision }) =>
+      `Done: ${files_moved} .chd file(s) moved` +
+      (renamed_due_to_collision > 0
+        ? `. ${renamed_due_to_collision} were renamed to avoid overwriting an existing file with the same name.`
+        : "."),
+    moveChdFailed: (err) => `Could not move: ${err}`,
+    updateNoticeAuto: (version) =>
+      `An update is available (v${version}). It will be installed automatically.`,
+    updateDownloading: (version, pct) => `Downloading update v${version}... ${pct}%`,
+    updateInstallingOverlay: "Installing...",
+    updateDoneOverlay: (version) => `Done! Updated to version ${version}.`,
+    updateRestartNow: "Restart now",
+    updateErrorOverlay: (err) => `Could not update: ${err}`,
+    updateDismiss: "Close",
     errors: {
       CHDMAN_NOT_CONFIGURED: "chdman.exe path is not configured",
       CHDMAN_NOT_FOUND: (path) =>

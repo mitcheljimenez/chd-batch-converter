@@ -1,3 +1,4 @@
+mod chd_mover;
 pub mod log_tail;
 mod organizer;
 mod scanner;
@@ -21,6 +22,7 @@ use tauri_plugin_updater::UpdaterExt;
 /// strobe of terminal windows.
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+use chd_mover::{move_chd_files as run_move_chd_files, MoveChdSummary};
 use log_tail::{parse_log_line, LogTailer};
 use organizer::{organize_multidisc as run_organize_multidisc, OrganizeSummary};
 use scanner::scan_folder;
@@ -44,14 +46,26 @@ fn prescan(root: String) -> Vec<scanner::ScannedDisc> {
     scan_folder(std::path::Path::new(&root))
 }
 
+/// `destination` is where every "<Game>.m3u/" folder is created — always
+/// flattened to one level there, regardless of how deeply the source discs
+/// were nested under `root`.
+///
 /// `android_base`, when present, is the Android-side path this folder maps
 /// to (e.g. `/storage/emulated/0/ROMs` or `/storage/1234-5678/ROMs`) — the
 /// UI collects it from the user only when they want playlists usable after
 /// copying to an Android device; omitted, playlists use plain relative
 /// filenames (correct for organizing on the same PC ES-DE runs on too).
 #[tauri::command]
-fn organize_multidisc(root: String, android_base: Option<String>) -> Result<OrganizeSummary, String> {
-    run_organize_multidisc(std::path::Path::new(&root), android_base.as_deref())
+fn organize_multidisc(root: String, destination: String, android_base: Option<String>) -> Result<OrganizeSummary, String> {
+    run_organize_multidisc(std::path::Path::new(&root), std::path::Path::new(&destination), android_base.as_deref())
+}
+
+/// Recursively finds every loose `.chd` under `root` and moves it into
+/// `destination`, flattened to one level, separating it from whatever
+/// `.bin`/`.cue`/`.iso` it was converted from.
+#[tauri::command]
+fn move_chd_files(root: String, destination: String) -> Result<MoveChdSummary, String> {
+    run_move_chd_files(std::path::Path::new(&root), std::path::Path::new(&destination))
 }
 
 /// Resolves the app's config directory, surfacing a failure as a `Result`
@@ -191,8 +205,22 @@ async fn install_update(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "NO_UPDATE_AVAILABLE".to_string())?;
 
+    // Emits running totals as "update-download-progress" so the frontend can
+    // drive a real progress bar instead of an indeterminate spinner for what
+    // (on a slow connection) can be several seconds of download.
+    let mut downloaded: u64 = 0;
+    let progress_handle = app_handle.clone();
     update
-        .download_and_install(|_chunk_len, _total| {}, || {})
+        .download_and_install(
+            move |chunk_len, total| {
+                downloaded += chunk_len as u64;
+                let _ = progress_handle.emit(
+                    "update-download-progress",
+                    serde_json::json!({ "downloaded": downloaded, "total": total }),
+                );
+            },
+            || {},
+        )
         .await
         .map_err(|e| e.to_string())?;
 
@@ -401,6 +429,7 @@ pub fn run() {
             greet,
             prescan,
             organize_multidisc,
+            move_chd_files,
             get_config,
             set_config,
             get_history,
