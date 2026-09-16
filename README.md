@@ -71,11 +71,6 @@ where effort would likely pay off most:
 8. **Config profiles** for people who juggle more than one ROMs
    directory or chdman path (e.g. separate PC and handheld libraries).
 
-## Design and implementation plan
-
-See `docs/superpowers/specs/2026-09-14-chd-batch-converter-design.md` and
-`docs/superpowers/plans/2026-09-14-chd-batch-converter.md`.
-
 ## Tests
 
 `tests/run_scenario.sh <name>` runs `convertir_a_chd.bat` for real (via

@@ -1,4 +1,6 @@
 .superpowers/
+docs/superpowers/plans/
+docs/superpowers/specs/
 chdman.exe
 # ...except the copy bundled as a Tauri resource, which is the runtime
 # fallback when no chdman path is configured and must ship with the repo.
