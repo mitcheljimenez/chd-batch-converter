@@ -2,12 +2,22 @@ pub mod log_tail;
 mod scanner;
 mod settings;
 
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
+
+/// Passed to every child process spawned here (the conversion script,
+/// `tasklist`, `taskkill`) via `.creation_flags(...)`. Without it, each spawn
+/// briefly flashes a new console window, since these are all console-
+/// subsystem programs and the GUI app itself has none for them to inherit.
+/// The `tasklist` liveness poll alone fires every 300ms for the run's whole
+/// duration, so this is the difference between one long conversion and a
+/// strobe of terminal windows.
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use log_tail::{parse_log_line, LogTailer};
 use scanner::scan_folder;
@@ -80,6 +90,7 @@ fn cancel_conversion(state: tauri::State<RunState>) -> Result<(), String> {
         let pid = child.id();
         let _ = Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
         *guard = None;
     }
@@ -153,7 +164,8 @@ fn start_conversion(
         .env("CHDMAN_OVERRIDE", &chdman_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
 
     let child = cmd.spawn().map_err(|e| e.to_string())?;
     let pid = child.id();
@@ -193,6 +205,7 @@ fn start_conversion(
             // on the next poll, rather than truncating the tail early.
             let still_running = match Command::new("tasklist")
                 .args(["/FI", &format!("PID eq {}", pid)])
+                .creation_flags(CREATE_NO_WINDOW)
                 .output()
             {
                 Ok(output) => String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()),
