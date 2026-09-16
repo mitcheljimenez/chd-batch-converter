@@ -38,6 +38,18 @@ fn resolve_app_config_dir(app_handle: &tauri::AppHandle) -> Result<std::path::Pa
     app_handle.path().app_config_dir().map_err(|e| e.to_string())
 }
 
+/// Strips the `\\?\` extended-length-path prefix Windows path resolution
+/// (Tauri's resource resolver, `std::fs::canonicalize`, etc.) commonly adds.
+/// `cmd.exe` and batch scripts cannot parse this prefix at all: `call
+/// "\\?\C:\...\chdman.exe"` fails instantly with "the system cannot find the
+/// path specified", even though the exact same path runs fine outside a
+/// batch context (e.g. spawned directly, or typed at a PowerShell prompt).
+/// Only a plain drive-letter path is ever handed to the `.bat` (as
+/// CHDMAN_OVERRIDE); this prefix must never survive into that string.
+fn strip_verbatim_prefix(path: &str) -> String {
+    path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
+}
+
 #[tauri::command]
 fn get_config(app_handle: tauri::AppHandle) -> Config {
     match resolve_app_config_dir(&app_handle) {
@@ -116,9 +128,9 @@ fn start_conversion(
         if !fallback.exists() {
             return Err("chdman.exe path not configured".to_string());
         }
-        fallback.to_string_lossy().to_string()
+        strip_verbatim_prefix(&fallback.to_string_lossy())
     } else {
-        config.chdman_path.clone()
+        strip_verbatim_prefix(&config.chdman_path)
     };
 
     if !std::path::Path::new(&chdman_path).exists() {
@@ -257,4 +269,28 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod verbatim_prefix_tests {
+    use super::strip_verbatim_prefix;
+
+    #[test]
+    fn strips_the_extended_length_prefix() {
+        // The exact shape Tauri's resource resolver / std::fs::canonicalize
+        // produces on Windows, and the exact shape that made `call
+        // "%CHDMAN%"` fail in the packaged app: cmd.exe's batch interpreter
+        // cannot parse a \\?\ prefixed path at all, even though the file it
+        // points to is perfectly valid and runs fine outside a .bat.
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\C:\Program Files\CHD Converter\build-assets\chdman.exe"),
+            r"C:\Program Files\CHD Converter\build-assets\chdman.exe"
+        );
+    }
+
+    #[test]
+    fn leaves_a_plain_path_untouched() {
+        let plain = r"C:\Games\chdman.exe";
+        assert_eq!(strip_verbatim_prefix(plain), plain);
+    }
 }
