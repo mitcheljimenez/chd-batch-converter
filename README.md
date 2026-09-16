@@ -56,19 +56,27 @@ where effort would likely pay off most:
 3. **Parallel conversion.** Discs currently convert one at a time;
    running a few `chdman` processes concurrently would meaningfully
    speed up large libraries on multi-core machines.
-4. **A "verify only" pass** — re-run `chdman verify` against existing
+4. **Per-file override of the `chdman` call** (`createcd` vs `createdvd`).
+   The scanner already auto-picks the right one per file type (`.cue`/`.bin`
+   → `createcd`, `.iso` → `createdvd`) and that stays the default — this
+   would let a user override it per detected file for the rare case the
+   auto-pick guesses wrong. Since a `.cue`→`createdvd` or `.iso`→`createcd`
+   mismatch produces a `.chd` that plays incorrectly (or not at all) rather
+   than failing loudly, the override UI needs a clear "you know what you're
+   doing" warning before accepting a non-default choice.
+5. **A "verify only" pass** — re-run `chdman verify` against existing
    `.chd` files without reconverting, useful after a drive move or to
    catch bit rot.
-5. **CI smoke tests on every push**, not just the release pipeline —
+6. **CI smoke tests on every push**, not just the release pipeline —
    catch a broken build before it's tagged, not after.
-6. **More languages** if there's demand — the Settings selector already
+7. **More languages** if there's demand — the Settings selector already
    supports adding a language as a self-contained dictionary in
    `ui/src/i18n.js`, so this is mostly translation work, not plumbing.
-7. **A conversion log viewer in the app** — right now a failure only
+8. **A conversion log viewer in the app** — right now a failure only
    shows a short message; being able to expand it to the full
    `conversion_log.txt` for that game would help diagnosing chdman
    errors without leaving the app.
-8. **Config profiles** for people who juggle more than one ROMs
+9. **Config profiles** for people who juggle more than one ROMs
    directory or chdman path (e.g. separate PC and handheld libraries).
 
 ## Tests
