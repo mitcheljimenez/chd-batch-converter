@@ -6,6 +6,7 @@ rem (a real Tomba!.cue-style filename), since two such values combined
 rem on one line supply the "!...!" pair delayed expansion looks for.
 setlocal
 set "CMD=%~1"
+echo MOCK_CHDMAN_RAWARGS: %*
 set "INPUT="
 set "OUTPUT="
 shift
