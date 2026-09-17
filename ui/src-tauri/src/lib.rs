@@ -1,4 +1,5 @@
 mod chd_mover;
+mod extractor;
 pub mod log_tail;
 mod organizer;
 mod scanner;
