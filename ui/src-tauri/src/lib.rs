@@ -291,6 +291,7 @@ fn start_conversion(
     window: tauri::Window,
     app_handle: tauri::AppHandle,
     root: String,
+    format_overrides: Vec<String>,
     state: tauri::State<RunState>,
 ) -> Result<(), String> {
     // Reject a second run while one is already in flight, BEFORE touching the
@@ -327,6 +328,25 @@ fn start_conversion(
     let log_path = std::path::Path::new(&root).join("conversion_log.txt");
     let _ = std::fs::remove_file(&log_path); // start each run from a clean log for the tailer's offset to make sense
 
+    // Same clean-slate-per-run treatment as conversion_log.txt above: a
+    // stale overrides file from a previous run must never leak into this
+    // one. Absent when format_overrides is empty (the common case) so
+    // FORMAT_OVERRIDES stays unset and convertir_a_chd.bat's existing
+    // "unset means no overrides" behavior applies unchanged.
+    let overrides_path = std::path::Path::new(&root).join("format_overrides.txt");
+    let _ = std::fs::remove_file(&overrides_path);
+    if !format_overrides.is_empty() {
+        // Every line, including the LAST one, must end in "\r\n": findstr
+        // /X (which convertir_a_chd.bat uses to match override lines)
+        // requires CRLF after a line to match it at all -- verified
+        // directly, a final line missing the trailing "\r\n" silently
+        // fails to match, which a plain .join("\r\n") would produce. Not
+        // just LF-vs-CRLF (see the FORMAT_OVERRIDES test fixture's commit
+        // message for that half of this gotcha).
+        let contents: String = format_overrides.iter().map(|p| format!("{}=cd\r\n", p)).collect();
+        std::fs::write(&overrides_path, contents).map_err(|e| e.to_string())?;
+    }
+
     let mut cmd = Command::new(&script_path);
     cmd.arg(&root)
         .env("CHDMAN_OVERRIDE", &chdman_path)
@@ -334,6 +354,9 @@ fn start_conversion(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW);
+    if !format_overrides.is_empty() {
+        cmd.env("FORMAT_OVERRIDES", &overrides_path);
+    }
 
     let child = cmd.spawn().map_err(|e| e.to_string())?;
     let pid = child.id();
