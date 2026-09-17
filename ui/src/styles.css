@@ -215,6 +215,17 @@ button.secondary { background: var(--surface-hover); }
 
 #move-chd-no-folder-hint { color: var(--text-dim); font-style: italic; }
 
+#extract-no-folder-hint { color: var(--text-dim); font-style: italic; }
+
+#extract-table {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 8px;
+}
+
 /* Full-window overlay shown while an update auto-installs (or, after the
    user confirms a manual install, during that download+install too) — the
    app content underneath must never be visible or usable mid-update, since

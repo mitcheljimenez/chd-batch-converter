@@ -61,6 +61,17 @@ const translations = {
         : "."),
     moveChdFailed: (err) => `No se pudo mover: ${err}`,
     openDestFolder: "Abrir carpeta destino",
+    navExtract: "Extraer .chd",
+    extractExplanation:
+      "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente. El .chd original no se toca ni se borra.",
+    extractNoFolderHint: "Elegí una carpeta primero.",
+    extractNoFilesFound: "No se encontraron archivos .chd en esta carpeta.",
+    extractBtn: "Extraer",
+    extractKindCd: "CD",
+    extractKindDvd: "DVD",
+    extractKindUnknown: "Desconocido",
+    extractDone: (path) => `Extraído: ${path}`,
+    extractFailed: (err) => `No se pudo extraer: ${err}`,
     updateNoticeAuto: (version) =>
       `Hay una actualización disponible (v${version}). Se va a instalar automáticamente.`,
     updateDownloading: (version, pct) => `Descargando actualización v${version}... ${pct}%`,
@@ -79,6 +90,9 @@ const translations = {
       UPDATE_DEFERRED_CONVERSION_IN_PROGRESS:
         "Hay una conversión en curso; se reintentará luego",
       NO_UPDATE_AVAILABLE: "No hay actualización disponible",
+      EXTRACT_UNKNOWN_FORMAT: "No se pudo determinar si este .chd es de CD o DVD",
+      EXTRACT_DEST_EXISTS: (path) => `Ya existe el archivo de destino: ${path}`,
+      EXTRACT_FAILED: "chdman no pudo extraer este archivo",
     },
   },
   en: {
@@ -143,6 +157,17 @@ const translations = {
         : "."),
     moveChdFailed: (err) => `Could not move: ${err}`,
     openDestFolder: "Open destination folder",
+    navExtract: "Extract .chd",
+    extractExplanation:
+      "This looks for .chd files in the chosen folder and lets you extract them back to .iso or .bin/.cue, auto-detecting the format. The original .chd is never touched or deleted.",
+    extractNoFolderHint: "Choose a folder first.",
+    extractNoFilesFound: "No .chd files found in this folder.",
+    extractBtn: "Extract",
+    extractKindCd: "CD",
+    extractKindDvd: "DVD",
+    extractKindUnknown: "Unknown",
+    extractDone: (path) => `Extracted: ${path}`,
+    extractFailed: (err) => `Could not extract: ${err}`,
     updateNoticeAuto: (version) =>
       `An update is available (v${version}). It will be installed automatically.`,
     updateDownloading: (version, pct) => `Downloading update v${version}... ${pct}%`,
@@ -161,6 +186,9 @@ const translations = {
       UPDATE_DEFERRED_CONVERSION_IN_PROGRESS:
         "A conversion is in progress; this will be retried later",
       NO_UPDATE_AVAILABLE: "No update available",
+      EXTRACT_UNKNOWN_FORMAT: "Could not determine whether this .chd is CD or DVD format",
+      EXTRACT_DEST_EXISTS: (path) => `Destination file already exists: ${path}`,
+      EXTRACT_FAILED: "chdman failed to extract this file",
     },
   },
 };

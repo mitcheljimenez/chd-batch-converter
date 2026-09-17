@@ -54,6 +54,11 @@ const moveChdPickDestBtn = document.getElementById("move-chd-pick-dest-btn");
 const moveChdDestLabel = document.getElementById("move-chd-dest-label");
 const runMoveChdBtn = document.getElementById("run-move-chd-btn");
 const moveChdOpenDestBtn = document.getElementById("move-chd-open-dest-btn");
+const navExtract = document.getElementById("nav-extract");
+const extractView = document.getElementById("extract-view");
+const extractExplanation = document.getElementById("extract-explanation");
+const extractNoFolderHint = document.getElementById("extract-no-folder-hint");
+const extractTable = document.getElementById("extract-table");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
 const languageLabelText = document.getElementById("language-label-text");
@@ -74,6 +79,7 @@ const views = {
   convert: convertView,
   organize: organizeView,
   moveChd: moveChdView,
+  extract: extractView,
   history: historyView,
   settings: settingsView,
 };
@@ -81,6 +87,7 @@ const navButtons = {
   convert: navConvert,
   organize: navOrganize,
   moveChd: navMoveChd,
+  extract: navExtract,
   history: navHistory,
   settings: navSettings,
 };
@@ -106,12 +113,15 @@ async function showView(name) {
     updateOrganizeAvailability();
   } else if (name === "moveChd") {
     updateMoveChdAvailability();
+  } else if (name === "extract") {
+    await rescanChds();
   }
 }
 
 navConvert.addEventListener("click", () => showView("convert"));
 navOrganize.addEventListener("click", () => showView("organize"));
 navMoveChd.addEventListener("click", () => showView("moveChd"));
+navExtract.addEventListener("click", () => showView("extract"));
 navHistory.addEventListener("click", () => showView("history"));
 navSettings.addEventListener("click", () => showView("settings"));
 
@@ -152,6 +162,8 @@ function applyTranslations() {
   moveChdDestLabel.textContent = moveChdDestination ?? t("noDestinationSelected");
   runMoveChdBtn.textContent = t("runMoveChd");
   moveChdOpenDestBtn.textContent = t("openDestFolder");
+  navExtract.textContent = t("navExtract");
+  extractExplanation.textContent = t("extractExplanation");
 }
 
 function mk(cls, text) {
@@ -283,6 +295,68 @@ async function rescan(root) {
   convertBtn.disabled = discs.length === 0;
 }
 
+let chds = []; // [{ name, folder, kind, extracting, result, error }]
+
+async function rescanChds() {
+  extractNoFolderHint.style.display = currentFolder ? "none" : "block";
+  if (!currentFolder) {
+    chds = [];
+    renderExtractTable();
+    return;
+  }
+  const scanned = await invoke("prescan_chds", { root: currentFolder });
+  chds = scanned.map((c) => ({ ...c, extracting: false, result: null, error: null }));
+  renderExtractTable();
+}
+
+function renderExtractTable() {
+  extractTable.innerHTML = "";
+  if (currentFolder && chds.length === 0) {
+    extractTable.appendChild(mk("disc-message", t("extractNoFilesFound")));
+    return;
+  }
+  for (const chd of chds) {
+    const row = document.createElement("div");
+    row.className = "disc-row";
+    const kindLabel = { cd: t("extractKindCd"), dvd: t("extractKindDvd"), unknown: t("extractKindUnknown") }[chd.kind];
+    const main = document.createElement("div");
+    main.className = "disc-row-main";
+    main.append(mk("disc-name", chd.name), mk("disc-message", kindLabel));
+
+    const btn = document.createElement("button");
+    btn.className = "secondary";
+    btn.textContent = t("extractBtn");
+    btn.disabled = chd.kind === "unknown" || chd.extracting;
+    btn.addEventListener("click", async () => {
+      chd.extracting = true;
+      chd.error = null;
+      renderExtractTable();
+      try {
+        const outputPath = await invoke("extract_chd_command", {
+          chdPath: `${chd.folder}\\${chd.name}`,
+          kind: chd.kind,
+        });
+        chd.result = outputPath;
+      } catch (err) {
+        chd.error = translateError(err);
+      } finally {
+        chd.extracting = false;
+        renderExtractTable();
+      }
+    });
+    main.appendChild(btn);
+    row.appendChild(main);
+
+    if (chd.result) {
+      row.appendChild(mk("disc-message", t("extractDone", chd.result)));
+    } else if (chd.error) {
+      row.appendChild(mk("disc-message", chd.error));
+    }
+
+    extractTable.appendChild(row);
+  }
+}
+
 pickFolderBtn.addEventListener("click", async () => {
   const selected = await open({ directory: true, multiple: false });
   if (!selected) return;
@@ -295,6 +369,7 @@ pickFolderBtn.addEventListener("click", async () => {
   convertOpenFolderBtn.disabled = false;
 
   await rescan(selected);
+  await rescanChds();
 });
 
 rescanBtn.addEventListener("click", async () => {

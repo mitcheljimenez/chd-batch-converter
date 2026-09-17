@@ -34,6 +34,7 @@
           <button id="nav-convert" class="nav-item active">Convertir</button>
           <button id="nav-organize" class="nav-item">Organizar multi-disco</button>
           <button id="nav-move-chd" class="nav-item">Mover .chd</button>
+          <button id="nav-extract" class="nav-item">Extraer .chd</button>
           <button id="nav-history" class="nav-item">Historial</button>
           <button id="nav-settings" class="nav-item">Configuración</button>
         </nav>
@@ -85,6 +86,12 @@
             </div>
             <button id="run-move-chd-btn" disabled>Mover</button>
             <button id="move-chd-open-dest-btn" class="secondary" style="display:none">Abrir carpeta destino</button>
+          </section>
+
+          <section id="extract-view" class="view panel-view" style="display:none">
+            <p id="extract-explanation">Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente. El .chd original no se toca ni se borra.</p>
+            <p id="extract-no-folder-hint">Elegí una carpeta primero.</p>
+            <div id="extract-table"></div>
           </section>
 
           <section id="history-view" class="view panel-view" style="display:none">
