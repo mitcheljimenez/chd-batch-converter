@@ -837,7 +837,7 @@ checkUpdatesBtn.addEventListener("click", async () => {
     const update = await invoke("check_for_update", { silent: false });
     await promptAndMaybeInstall(update, { alwaysReport: true });
   } catch (err) {
-    showUpdateResult(t("checkFailed"));
+    showUpdateResult(translateError(err));
   }
 });
 
