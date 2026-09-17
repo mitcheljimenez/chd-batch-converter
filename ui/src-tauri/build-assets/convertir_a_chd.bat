@@ -90,6 +90,26 @@ if exist "%OUT%" (
     goto :eof
 )
 
+rem createdvd defaults to zstd compression, which AetherSX2/NetherSX2 on
+rem Android cannot read (unlike createcd's default codec set, which never
+rem includes zstd). -c zlib keeps DVD CHDs readable there. See:
+rem https://github.com/Trixarian/NetherSX2-patch/issues/104
+rem
+rem A per-file override (FORMAT_OVERRIDES, an exact "<full path>=cd" line)
+rem lets the caller force CD format for a specific .iso instead. This check
+rem must live here (inside a CALL'd label, which parses fresh every
+rem invocation) rather than at the for-loop call site above: cmd.exe
+rem expands %VAR% in a parenthesized block using the value from BEFORE the
+rem block started, even after a "set" earlier in that same block -- the
+rem exact bug documented on ensure_trailing_backslash above.
+if /I "%SUBCMD%"=="createdvd" (
+    set "SUBCMD=createdvd -c zlib"
+    if defined FORMAT_OVERRIDES if exist "%FORMAT_OVERRIDES%" (
+        findstr /X /C:"%SRC%=cd" "%FORMAT_OVERRIDES%" >nul
+        if not errorlevel 1 set "SUBCMD=createcd"
+    )
+)
+
 call "%CHDMAN%" %SUBCMD% -i "%SRC%" -o "%OUT%" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log "FAIL  | %SRC% | fallo la conversion"
