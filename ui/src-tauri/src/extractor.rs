@@ -11,13 +11,19 @@ pub struct ScannedChd {
     pub kind: String,
 }
 
-/// Recursively finds every `.chd` under `root` and classifies each as
+/// Recursively finds every `.chd` under `root` (including nested
+/// subfolders) that hasn't already been extracted, and classifies each as
 /// "cd", "dvd", or "unknown" by running `chdman info` on it (see
-/// `classify_chd_info`). Caller must have already verified `chdman_path`
-/// exists (as `resolve_chdman_path` in lib.rs does before this is ever
-/// called): a missing/misconfigured chdman would otherwise make `chdman
-/// info` fail to spawn for every single `.chd` found, silently collapsing
-/// the whole scan to "unknown" instead of surfacing the real problem.
+/// `classify_chd_info`). "Already extracted" means a `.iso` (dvd) or
+/// `.cue`/`.bin` (cd) sibling already sits next to it -- `extract_chd_with_
+/// progress` would refuse those anyway (`EXTRACT_DEST_EXISTS`), so leaving
+/// them out keeps the list to files actually worth acting on, the same way
+/// `scanner::scan_folder` already excludes a `.cue`/`.iso` that already has
+/// a sibling `.chd`. Caller must have already verified `chdman_path` exists
+/// (as `resolve_chdman_path` in lib.rs does before this is ever called): a
+/// missing/misconfigured chdman would otherwise make `chdman info` fail to
+/// spawn for every single `.chd` found, silently collapsing the whole scan
+/// to "unknown" instead of surfacing the real problem.
 pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
     let mut results = Vec::new();
     for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
@@ -40,6 +46,9 @@ pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
             .output()
             .map(|out| classify_chd_info(&String::from_utf8_lossy(&out.stdout)).to_string())
             .unwrap_or_else(|_| "unknown".to_string());
+        if already_extracted(path, &kind) {
+            continue;
+        }
         results.push(ScannedChd {
             name: path.file_name().unwrap().to_string_lossy().to_string(),
             folder: path.parent().unwrap().to_string_lossy().to_string(),
@@ -47,6 +56,19 @@ pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
         });
     }
     results
+}
+
+/// Whether `chd_path`'s extraction target(s) already exist next to it: a
+/// `.iso` for a dvd-kind CHD, or a `.cue`/`.bin` for a cd-kind one (either
+/// alone counts -- `extract_chd_with_progress` refuses as soon as one of
+/// the pair exists). An "unknown" kind has no defined target, so it's never
+/// considered already-extracted here.
+fn already_extracted(chd_path: &Path, kind: &str) -> bool {
+    match kind {
+        "dvd" => chd_path.with_extension("iso").exists(),
+        "cd" => chd_path.with_extension("cue").exists() || chd_path.with_extension("bin").exists(),
+        _ => false,
+    }
 }
 
 /// Extracts `chd_path` back to its original format next to itself: `.cue`
@@ -191,6 +213,84 @@ pub fn classify_chd_info(info_output: &str) -> &'static str {
         "dvd"
     } else {
         "unknown"
+    }
+}
+
+#[cfg(test)]
+mod already_extracted_tests {
+    use super::already_extracted;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("chd_already_extracted_test_{}_{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn dvd_is_already_extracted_when_a_sibling_iso_exists() {
+        let dir = temp_dir("dvd_iso_exists");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+        fs::write(dir.join("Game.iso"), b"existing iso").unwrap();
+
+        assert!(already_extracted(&chd, "dvd"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn dvd_is_not_already_extracted_without_a_sibling_iso() {
+        let dir = temp_dir("dvd_no_iso");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+
+        assert!(!already_extracted(&chd, "dvd"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cd_is_already_extracted_when_only_a_sibling_cue_exists() {
+        let dir = temp_dir("cd_cue_only");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+        fs::write(dir.join("Game.cue"), b"existing cue").unwrap();
+
+        assert!(already_extracted(&chd, "cd"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cd_is_already_extracted_when_only_a_sibling_bin_exists() {
+        let dir = temp_dir("cd_bin_only");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+        fs::write(dir.join("Game.bin"), b"existing bin").unwrap();
+
+        assert!(already_extracted(&chd, "cd"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cd_is_not_already_extracted_without_cue_or_bin() {
+        let dir = temp_dir("cd_neither");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+
+        assert!(!already_extracted(&chd, "cd"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unknown_kind_is_never_considered_already_extracted() {
+        let dir = temp_dir("unknown_kind");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+        fs::write(dir.join("Game.iso"), b"existing iso").unwrap();
+
+        assert!(!already_extracted(&chd, "unknown"));
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
 

@@ -2,7 +2,7 @@
 
 Desktop UI for `../convertir_a_chd.bat`. Built with Tauri.
 
-**Current version:** 0.1.14
+**Current version:** 0.1.15
 
 ## Install
 
@@ -63,8 +63,9 @@ here is a from-scratch Rust implementation, not a port of their script.
 
 ## Extraer .chd
 
-The "Extraer .chd" section finds every `.chd` in your chosen folder,
-detects whether each one is CD format (`.bin`/`.cue`) or DVD format
+The "Extraer .chd" section finds every `.chd` in your chosen folder and its
+subfolders that doesn't already have its `.iso`/`.bin`/`.cue` sitting next
+to it, detects whether each one is CD format (`.bin`/`.cue`) or DVD format
 (`.iso`) by inspecting it with `chdman info`, and lets you unpack it back
 to its original files — either one at a time with a per-row "Extraer"
 button, or all at once with "Extraer todos". Both run in the background
