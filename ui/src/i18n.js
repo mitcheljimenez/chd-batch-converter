@@ -52,7 +52,7 @@ const translations = {
     navMoveChd: "Mover .chd",
     moveChdExplanation:
       "Esto va a buscar todos los archivos .chd, incluso en subcarpetas anidadas, y moverlos a la carpeta destino, separándolos de sus .bin/.cue/.iso originales (que quedan donde estaban).",
-    moveChdNoFolderHint: "Elegí una carpeta de origen y una de destino primero.",
+    moveChdNoFolderHint: "Elige una carpeta de origen y una de destino primero.",
     runMoveChd: "Mover",
     moveChdSummary: ({ files_moved, renamed_due_to_collision }) =>
       `Listo: ${files_moved} archivo(s) .chd movido(s)` +
@@ -64,7 +64,7 @@ const translations = {
     navExtract: "Extraer .chd",
     extractExplanation:
       "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente. El .chd original no se toca ni se borra.",
-    extractNoFolderHint: "Elegí una carpeta primero.",
+    extractNoFolderHint: "Elige una carpeta primero.",
     extractNoFilesFound: "No se encontraron archivos .chd en esta carpeta.",
     extractBtn: "Extraer",
     extractKindCd: "CD",
