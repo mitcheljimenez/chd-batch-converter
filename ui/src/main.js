@@ -59,6 +59,9 @@ const navExtract = document.getElementById("nav-extract");
 const extractView = document.getElementById("extract-view");
 const extractExplanation = document.getElementById("extract-explanation");
 const extractNoFolderHint = document.getElementById("extract-no-folder-hint");
+const extractAllBtn = document.getElementById("extract-all-btn");
+const extractProgressTrack = document.getElementById("extract-progress-track");
+const extractProgressFill = document.getElementById("extract-progress-fill");
 const extractTable = document.getElementById("extract-table");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
@@ -115,7 +118,18 @@ async function showView(name) {
   } else if (name === "moveChd") {
     updateMoveChdAvailability();
   } else if (name === "extract") {
-    await rescanChds();
+    // Only re-scan the first time this folder's Extract tab is opened, not
+    // on every visit -- otherwise navigating away and back (or just
+    // switching tabs mid-run) would wipe out-of-progress/finished rows and
+    // replace them with a fresh "pending" scan, discarding real state for
+    // no reason.
+    extractNoFolderHint.style.display = currentFolder ? "none" : "block";
+    if (currentFolder && chdsScannedForFolder !== currentFolder) {
+      await rescanChds();
+    } else {
+      renderExtractTable();
+      updateExtractAllAvailability();
+    }
   }
 }
 
@@ -165,6 +179,7 @@ function applyTranslations() {
   moveChdOpenDestBtn.textContent = t("openDestFolder");
   navExtract.textContent = t("navExtract");
   extractExplanation.textContent = t("extractExplanation");
+  extractAllBtn.textContent = t("extractAllBtn");
 }
 
 function mk(cls, text) {
@@ -320,18 +335,71 @@ async function rescan(root) {
   convertBtn.disabled = discs.length === 0;
 }
 
-let chds = []; // [{ name, folder, kind, extracting, result, error }]
+let chds = []; // [{ name, folder, kind, status: "pending"|"ok"|"fail", progressPhase, progressPercent, result, error }]
+let extractRunning = false;
+// Which folder `chds` currently reflects, so showView("extract") can tell a
+// genuinely new folder (needs a fresh scan) apart from just re-opening the
+// tab on the same one (must NOT wipe existing rows/results).
+let chdsScannedForFolder = null;
+// The items the in-flight run() was started with -- NOT always all of
+// `chds` (a single row's "Extraer" button runs just that one item). The
+// overall progress bar must be computed against this subset, not the full
+// table, or a single-file extraction finishes at 1/N% instead of 100%.
+let currentRunChds = [];
+
+function fullChdPath(chd) {
+  return `${chd.folder}\\${chd.name}`;
+}
 
 async function rescanChds() {
   extractNoFolderHint.style.display = currentFolder ? "none" : "block";
   if (!currentFolder) {
     chds = [];
+    chdsScannedForFolder = null;
     renderExtractTable();
+    updateExtractAllAvailability();
     return;
   }
   const scanned = await invoke("prescan_chds", { root: currentFolder });
-  chds = scanned.map((c) => ({ ...c, extracting: false, result: null, error: null }));
+  chds = scanned.map((c) => ({ ...c, status: "pending", result: null, error: null }));
+  chdsScannedForFolder = currentFolder;
   renderExtractTable();
+  updateExtractAllAvailability();
+}
+
+function updateExtractAllAvailability() {
+  const hasExtractable = chds.some((c) => c.kind !== "unknown" && c.status !== "ok");
+  extractAllBtn.disabled = extractRunning || !hasExtractable;
+}
+
+// Mirrors updateProgress() for the Convert tab: weighs the active item's own
+// live percent as a fraction of one unit instead of only counting whole
+// finished/pending steps, so the overall bar moves smoothly instead of
+// jumping in steps of 1/N. Extraction is weighted as 70% of an item's work
+// and verification as the remaining 30%, matching Convert's
+// compressing/verifying split. Computed against `currentRunChds` (the
+// items the in-flight run actually includes), NOT the full `chds` table --
+// a single row's "Extraer" button only ever touches one item, and dividing
+// by every scanned .chd would strand the bar far short of 100% when it
+// finishes.
+function updateExtractProgress() {
+  if (currentRunChds.length === 0) {
+    extractProgressFill.style.width = "0%";
+    return;
+  }
+  let doneUnits = 0;
+  for (const chd of currentRunChds) {
+    if (chd.status !== "pending") {
+      doneUnits += 1;
+    } else if (chd.progressPercent !== undefined) {
+      doneUnits +=
+        chd.progressPhase === "verifying"
+          ? 0.7 + (chd.progressPercent / 100) * 0.3
+          : (chd.progressPercent / 100) * 0.7;
+    }
+  }
+  const pct = Math.min(100, Math.round((doneUnits / currentRunChds.length) * 100));
+  extractProgressFill.style.width = `${pct}%`;
 }
 
 function renderExtractTable() {
@@ -344,43 +412,123 @@ function renderExtractTable() {
     const row = document.createElement("div");
     row.className = "disc-row";
     const kindLabel = { cd: t("extractKindCd"), dvd: t("extractKindDvd"), unknown: t("extractKindUnknown") }[chd.kind];
+    const icon = { pending: "•", ok: "✅", fail: "❌" }[chd.status];
     const main = document.createElement("div");
     main.className = "disc-row-main";
-    main.append(mk("disc-name", chd.name), mk("disc-message", kindLabel));
+
+    let messageText = kindLabel;
+    if (chd.status === "pending" && chd.progressPercent !== undefined) {
+      messageText = t(
+        chd.progressPhase === "verifying" ? "phaseExtractVerifying" : "phaseExtracting",
+        Math.round(chd.progressPercent)
+      );
+    } else if (chd.status === "ok") {
+      messageText = t("extractDone", chd.result);
+    } else if (chd.status === "fail") {
+      messageText = chd.error;
+    }
+
+    main.append(
+      mk(`disc-status-icon status-${chd.status}`, icon),
+      mk("disc-name", chd.name),
+      mk("disc-message", messageText)
+    );
 
     const btn = document.createElement("button");
     btn.className = "secondary";
     btn.textContent = t("extractBtn");
-    btn.disabled = chd.kind === "unknown" || chd.extracting;
-    btn.addEventListener("click", async () => {
-      chd.extracting = true;
-      chd.error = null;
-      renderExtractTable();
-      try {
-        const outputPath = await invoke("extract_chd_command", {
-          chdPath: `${chd.folder}\\${chd.name}`,
-          kind: chd.kind,
-        });
-        chd.result = outputPath;
-      } catch (err) {
-        chd.error = translateError(err);
-      } finally {
-        chd.extracting = false;
-        renderExtractTable();
-      }
-    });
+    btn.disabled = chd.kind === "unknown" || chd.status !== "pending" || extractRunning;
+    btn.addEventListener("click", () => runExtraction([chd]));
     main.appendChild(btn);
     row.appendChild(main);
 
-    if (chd.result) {
-      row.appendChild(mk("disc-message", t("extractDone", chd.result)));
-    } else if (chd.error) {
-      row.appendChild(mk("disc-message", chd.error));
+    if (chd.status === "pending" && chd.progressPercent !== undefined) {
+      const track = document.createElement("div");
+      track.className = "disc-progress-track";
+      const fill = document.createElement("div");
+      fill.className = "disc-progress-fill";
+      fill.style.width = `${Math.round(chd.progressPercent)}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
     }
 
     extractTable.appendChild(row);
   }
 }
+
+// Drives both the per-row "Extraer" button (a single-item list) and
+// "Extraer todos" (every pending, non-"unknown" item) through the same
+// streaming backend command, so a single-file extraction gets a live
+// progress bar too instead of the UI going silent for however long chdman
+// takes.
+async function runExtraction(items) {
+  if (items.length === 0 || extractRunning) return;
+  extractRunning = true;
+  currentRunChds = items;
+  extractAllBtn.disabled = true;
+  extractProgressTrack.style.display = "block";
+  extractProgressFill.style.width = "0%";
+  renderExtractTable();
+  try {
+    await invoke("start_extract_all", {
+      items: items.map((c) => ({ chd_path: fullChdPath(c), kind: c.kind })),
+    });
+  } catch (err) {
+    // A real failure (bad chdman path, or another run already in flight)
+    // must not leave the UI stuck in "extracting" state forever.
+    extractRunning = false;
+    currentRunChds = [];
+    extractProgressTrack.style.display = "none";
+    alert(t("extractFailed", translateError(err)));
+    renderExtractTable();
+    updateExtractAllAvailability();
+  }
+}
+
+extractAllBtn.addEventListener("click", () => {
+  const items = chds.filter((c) => c.kind !== "unknown" && c.status !== "ok");
+  runExtraction(items);
+});
+
+function matchChdByPath(chdPath) {
+  return chds.find((c) => fullChdPath(c) === chdPath);
+}
+
+listen("extract-item-progress", (event) => {
+  const { chd_path, phase, percent } = event.payload;
+  const chd = matchChdByPath(chd_path);
+  if (chd && chd.status === "pending") {
+    chd.progressPhase = phase;
+    chd.progressPercent = percent;
+    renderExtractTable();
+    updateExtractProgress();
+  }
+});
+
+listen("extract-item-done", (event) => {
+  const { chd_path, output, error } = event.payload;
+  const chd = matchChdByPath(chd_path);
+  if (chd) {
+    chd.progressPercent = undefined;
+    chd.progressPhase = undefined;
+    if (error) {
+      chd.status = "fail";
+      chd.error = translateError(error);
+    } else {
+      chd.status = "ok";
+      chd.result = output;
+    }
+    renderExtractTable();
+    updateExtractProgress();
+  }
+});
+
+listen("extract-all-finished", () => {
+  extractRunning = false;
+  currentRunChds = [];
+  extractProgressTrack.style.display = "none";
+  updateExtractAllAvailability();
+});
 
 pickFolderBtn.addEventListener("click", async () => {
   const selected = await open({ directory: true, multiple: false });

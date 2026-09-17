@@ -66,8 +66,14 @@ here is a from-scratch Rust implementation, not a port of their script.
 The "Extraer .chd" section finds every `.chd` in your chosen folder,
 detects whether each one is CD format (`.bin`/`.cue`) or DVD format
 (`.iso`) by inspecting it with `chdman info`, and lets you unpack it back
-to its original files with a per-row "Extraer" button. This is mainly
-useful for recovering a `.chd` an older version of this app converted with
+to its original files — either one at a time with a per-row "Extraer"
+button, or all at once with "Extraer todos". Both run in the background
+with a live progress bar (per-row and overall), the same as the Convertir
+tab, so the UI never blocks or looks stuck while chdman works through a
+file. After each extraction, `chdman verify` also checks the source `.chd`
+itself isn't corrupt — the same safety check `createcd`/`createdvd`
+already run after compressing during conversion. This is mainly useful
+for recovering a `.chd` an older version of this app converted with
 `createdvd`'s default Zstandard compression (unreadable by NetherSX2/
 AetherSX2 on Android): extract it back to `.iso`, then re-run "Convertir
 todo" on that folder to get a fresh, DVD-zlib `.chd`. The original `.chd`

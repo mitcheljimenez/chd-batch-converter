@@ -55,18 +55,123 @@ fn prescan_chds(root: String, app_handle: tauri::AppHandle) -> Result<Vec<extrac
     Ok(extractor::scan_chds(std::path::Path::new(&root), std::path::Path::new(&chdman_path)))
 }
 
-/// Unpacks a single `.chd` back to its original format (`.cue`+`.bin` for
-/// `kind == "cd"`, `.iso` for `kind == "dvd"`) next to itself. `kind` comes
-/// from a prior `prescan_chds` call, which is the only place that runs
-/// `chdman info` to determine it -- see `extractor::extract_chd`'s own doc
-/// comment for why guessing it here instead would be unsafe.
+/// One `.chd` to unpack, as scanned by a prior `prescan_chds` call -- the
+/// only place that runs `chdman info` to determine `kind`, since guessing it
+/// here instead would be unsafe (see `extractor::extract_chd_with_progress`'s
+/// doc comment).
+#[derive(serde::Deserialize, Debug, Clone)]
+struct ExtractItem {
+    chd_path: String,
+    kind: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct ExtractProgressEvent {
+    chd_path: String,
+    phase: String,
+    percent: f32,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct ExtractItemDone {
+    chd_path: String,
+    output: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct ExtractAllFinished {
+    done: u32,
+    failed: u32,
+}
+
+/// Whether an `extract` run is currently in flight. Separate from `RunState`
+/// (the conversion script's own child-process tracking) since extraction
+/// never runs through `convertir_a_chd.bat` -- each item is a direct chdman
+/// invocation from a background thread, not a single trackable `Child`.
+struct ExtractState(Arc<AtomicBool>);
+
+/// Unpacks every `.chd` in `items` back to its original format (`.cue`+
+/// `.bin` for `kind == "cd"`, `.iso` for `kind == "dvd"`), one at a time,
+/// from a background thread -- so this returns immediately and the UI stays
+/// responsive, the same shape as `start_conversion`. Each item's chdman
+/// invocation streams "Extracting, X%"/"Verifying, X%" progress as
+/// `extract-item-progress`, then reports success/failure as
+/// `extract-item-done`; `extract-all-finished` fires once every item has
+/// been attempted.
 #[tauri::command]
-fn extract_chd_command(chd_path: String, kind: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+fn start_extract_all(
+    window: tauri::Window,
+    app_handle: tauri::AppHandle,
+    items: Vec<ExtractItem>,
+    state: tauri::State<ExtractState>,
+) -> Result<(), String> {
+    // swap(true) both checks and claims the slot atomically, so two rapid
+    // clicks can't both pass the check and run concurrently.
+    if state.0.swap(true, Ordering::SeqCst) {
+        return Err("EXTRACT_IN_PROGRESS".to_string());
+    }
+
     let app_dir = resolve_app_config_dir(&app_handle)?;
     let config = load_config(&app_dir);
-    let chdman_path = resolve_chdman_path(&app_handle, &config)?;
-    let output = extractor::extract_chd(std::path::Path::new(&chdman_path), std::path::Path::new(&chd_path), &kind)?;
-    Ok(output.to_string_lossy().to_string())
+    let chdman_path = match resolve_chdman_path(&app_handle, &config) {
+        Ok(path) => path,
+        Err(e) => {
+            // Release the slot we just claimed -- this run never actually
+            // started, so a later click must be allowed to try again.
+            state.0.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
+    };
+
+    let running_flag = state.0.clone();
+    thread::spawn(move || {
+        let mut done = 0u32;
+        let mut failed = 0u32;
+        for item in items {
+            let chd_path = std::path::PathBuf::from(&item.chd_path);
+            let progress_window = window.clone();
+            let progress_chd_path = item.chd_path.clone();
+            let result = extractor::extract_chd_with_progress(
+                std::path::Path::new(&chdman_path),
+                &chd_path,
+                &item.kind,
+                |phase, percent| {
+                    let _ = progress_window.emit(
+                        "extract-item-progress",
+                        ExtractProgressEvent {
+                            chd_path: progress_chd_path.clone(),
+                            phase: phase.to_string(),
+                            percent,
+                        },
+                    );
+                },
+            );
+            let event = match result {
+                Ok(output) => {
+                    done += 1;
+                    ExtractItemDone {
+                        chd_path: item.chd_path.clone(),
+                        output: Some(output.to_string_lossy().to_string()),
+                        error: None,
+                    }
+                }
+                Err(e) => {
+                    failed += 1;
+                    ExtractItemDone {
+                        chd_path: item.chd_path.clone(),
+                        output: None,
+                        error: Some(e),
+                    }
+                }
+            };
+            let _ = window.emit("extract-item-done", event);
+        }
+        let _ = window.emit("extract-all-finished", ExtractAllFinished { done, failed });
+        running_flag.store(false, Ordering::SeqCst);
+    });
+
+    Ok(())
 }
 
 /// `destination` is where every "<Game>.m3u/" folder is created — always
@@ -479,11 +584,12 @@ pub fn run() {
             Arc::new(Mutex::new(None)),
             Arc::new(AtomicBool::new(false)),
         ))
+        .manage(ExtractState(Arc::new(AtomicBool::new(false))))
         .invoke_handler(tauri::generate_handler![
             greet,
             prescan,
             prescan_chds,
-            extract_chd_command,
+            start_extract_all,
             organize_multidisc,
             move_chd_files,
             get_config,

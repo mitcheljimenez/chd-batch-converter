@@ -1,6 +1,7 @@
+use std::io::Read;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use walkdir::WalkDir;
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
@@ -49,14 +50,28 @@ pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
 }
 
 /// Extracts `chd_path` back to its original format next to itself: `.cue`
-/// + `.bin` for a CD-type CHD, or `.iso` for a DVD-type CHD. Never
-/// overwrites an existing output file -- refuses before spawning chdman at
-/// all, since `kind` must already be known via `scan_chds`/
-/// `classify_chd_info` rather than guessed here (chdman's extractors don't
-/// validate the input CHD's type, and would silently write garbage if run
-/// against the wrong one).
-pub fn extract_chd(chdman_path: &Path, chd_path: &Path, kind: &str) -> Result<PathBuf, String> {
-    match kind {
+/// + `.bin` for a CD-type CHD, or `.iso` for a DVD-type CHD, then runs
+/// `chdman verify` against the source `.chd` to confirm it isn't corrupt
+/// (the same check `createcd`/`createdvd` already do after compressing --
+/// extraction had no equivalent safety net before this). Never overwrites
+/// an existing output file -- refuses before spawning chdman at all, since
+/// `kind` must already be known via `scan_chds`/`classify_chd_info` rather
+/// than guessed here (chdman's extractors don't validate the input CHD's
+/// type, and would silently write garbage if run against the wrong one).
+///
+/// `on_progress` is called for every "Extracting, X%"/"Verifying, X%" line
+/// chdman prints, so a caller can drive a live progress bar instead of
+/// blocking silently for the whole operation (chdman is not asked to run
+/// concurrently with anything else here -- the caller is expected to run
+/// this from a background thread if it must keep its own UI thread free,
+/// the same way `start_conversion` runs the batch script from one).
+pub fn extract_chd_with_progress(
+    chdman_path: &Path,
+    chd_path: &Path,
+    kind: &str,
+    mut on_progress: impl FnMut(&str, f32),
+) -> Result<PathBuf, String> {
+    let output = match kind {
         "cd" => {
             let cue = chd_path.with_extension("cue");
             let bin = chd_path.with_extension("bin");
@@ -66,35 +81,100 @@ pub fn extract_chd(chdman_path: &Path, chd_path: &Path, kind: &str) -> Result<Pa
             if bin.exists() {
                 return Err(format!("EXTRACT_DEST_EXISTS:{}", bin.display()));
             }
-            run_extract(chdman_path, "extractcd", chd_path, &cue)?;
-            Ok(cue)
+            run_with_progress(chdman_path, "extractcd", chd_path, Some(&cue), &mut on_progress)
+                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            cue
         }
         "dvd" => {
             let iso = chd_path.with_extension("iso");
             if iso.exists() {
                 return Err(format!("EXTRACT_DEST_EXISTS:{}", iso.display()));
             }
-            run_extract(chdman_path, "extractdvd", chd_path, &iso)?;
-            Ok(iso)
+            run_with_progress(chdman_path, "extractdvd", chd_path, Some(&iso), &mut on_progress)
+                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            iso
         }
-        _ => Err("EXTRACT_UNKNOWN_FORMAT".to_string()),
+        _ => return Err("EXTRACT_UNKNOWN_FORMAT".to_string()),
+    };
+
+    run_with_progress(chdman_path, "verify", chd_path, None, &mut on_progress)
+        .map_err(|_| "EXTRACT_VERIFY_FAILED".to_string())?;
+
+    Ok(output)
+}
+
+/// Runs `chdman <subcommand> -i chd_path [-o output]`, streaming its stdout
+/// line-by-line (splitting on chdman's bare '\r' progress-overwrite trick
+/// the same way `log_tail::LogTailer` does for the conversion script) and
+/// calling `on_progress(phase, percent)` for every "Extracting, X%
+/// complete..." or "Verifying, X% complete..." line it prints. Returns
+/// `Err(())` on a spawn failure or non-zero exit; the caller maps that to
+/// the specific stable error code for its context (extraction vs. verify).
+fn run_with_progress(
+    chdman_path: &Path,
+    subcommand: &str,
+    chd_path: &Path,
+    output: Option<&Path>,
+    on_progress: &mut impl FnMut(&str, f32),
+) -> Result<(), ()> {
+    let mut command = Command::new(chdman_path);
+    command.arg(subcommand).arg("-i").arg(chd_path);
+    if let Some(out_path) = output {
+        command.arg("-o").arg(out_path);
+    }
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(crate::CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|_| ())?;
+
+    let mut stdout = child.stdout.take().ok_or(())?;
+    let mut partial = String::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = stdout.read(&mut chunk).unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+        partial.push_str(&String::from_utf8_lossy(&chunk[..n]));
+        let normalized = partial.replace("\r\n", "\n").replace('\r', "\n");
+        let mut lines: Vec<&str> = normalized.split('\n').collect();
+        // The last element is whatever came after the final '\n' (possibly
+        // empty) -- an incomplete line still being written, held back for
+        // the next read the same way LogTailer holds its `partial`.
+        let tail = lines.pop().unwrap_or("").to_string();
+        for line in lines {
+            if let Some((phase, percent)) = parse_phase_progress(line) {
+                on_progress(phase, percent);
+            }
+        }
+        partial = tail;
+    }
+
+    let status = child.wait().map_err(|_| ())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(())
     }
 }
 
-fn run_extract(chdman_path: &Path, subcommand: &str, chd_path: &Path, output: &Path) -> Result<(), String> {
-    let status = Command::new(chdman_path)
-        .arg(subcommand)
-        .arg("-i")
-        .arg(chd_path)
-        .arg("-o")
-        .arg(output)
-        .creation_flags(crate::CREATE_NO_WINDOW)
-        .status()
-        .map_err(|e| e.to_string())?;
-    if !status.success() {
-        return Err("EXTRACT_FAILED".to_string());
-    }
-    Ok(())
+/// Parses chdman's own progress output for extraction/verification, e.g.
+/// "Extracting, 42.9% complete... " or "Verifying, 71.7% complete...".
+fn parse_phase_progress(line: &str) -> Option<(&'static str, f32)> {
+    let trimmed = line.trim_start();
+    let (phase, rest) = if let Some(r) = trimmed.strip_prefix("Extracting, ") {
+        ("extracting", r)
+    } else if let Some(r) = trimmed.strip_prefix("Verifying, ") {
+        ("verifying", r)
+    } else {
+        return None;
+    };
+    let percent_str = rest.split('%').next()?;
+    let percent: f32 = percent_str.trim().parse().ok()?;
+    Some((phase, percent))
 }
 
 /// Classifies a `chdman info` invocation's stdout as `"cd"` (created via
@@ -167,11 +247,11 @@ mod extract_chd_tests {
         let chd = dir.join("Game.chd");
         fs::write(&chd, b"fake").unwrap();
         // A nonexistent chdman path proves no subprocess was attempted --
-        // if extract_chd tried to spawn it, this would fail with a spawn
-        // error instead of the unknown-format error.
+        // if extract_chd_with_progress tried to spawn it, this would fail
+        // with a spawn error instead of the unknown-format error.
         let bogus_chdman = dir.join("does_not_exist.exe");
 
-        let result = extract_chd(&bogus_chdman, &chd, "unknown");
+        let result = extract_chd_with_progress(&bogus_chdman, &chd, "unknown", |_, _| {});
 
         assert_eq!(result, Err("EXTRACT_UNKNOWN_FORMAT".to_string()));
         fs::remove_dir_all(&dir).unwrap();
@@ -185,7 +265,7 @@ mod extract_chd_tests {
         fs::write(dir.join("Game.cue"), b"existing cue").unwrap();
         let bogus_chdman = dir.join("does_not_exist.exe");
 
-        let result = extract_chd(&bogus_chdman, &chd, "cd");
+        let result = extract_chd_with_progress(&bogus_chdman, &chd, "cd", |_, _| {});
 
         assert!(matches!(result, Err(ref msg) if msg.starts_with("EXTRACT_DEST_EXISTS:")));
         fs::remove_dir_all(&dir).unwrap();
@@ -199,9 +279,34 @@ mod extract_chd_tests {
         fs::write(dir.join("Game.iso"), b"existing iso").unwrap();
         let bogus_chdman = dir.join("does_not_exist.exe");
 
-        let result = extract_chd(&bogus_chdman, &chd, "dvd");
+        let result = extract_chd_with_progress(&bogus_chdman, &chd, "dvd", |_, _| {});
 
         assert!(matches!(result, Err(ref msg) if msg.starts_with("EXTRACT_DEST_EXISTS:")));
         fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod parse_phase_progress_tests {
+    use super::parse_phase_progress;
+
+    #[test]
+    fn parses_an_extracting_line() {
+        let (phase, percent) = parse_phase_progress("Extracting, 42.9% complete... ").expect("should parse");
+        assert_eq!(phase, "extracting");
+        assert!((percent - 42.9).abs() < 0.001);
+    }
+
+    #[test]
+    fn parses_a_verifying_line() {
+        let (phase, percent) = parse_phase_progress("Verifying, 71.7% complete...").expect("should parse");
+        assert_eq!(phase, "verifying");
+        assert!((percent - 71.7).abs() < 0.001);
+    }
+
+    #[test]
+    fn ignores_unrelated_lines() {
+        assert_eq!(parse_phase_progress("chdman - MAME Compressed Hunks of Data (CHD) manager 0.289"), None);
+        assert_eq!(parse_phase_progress("Extraction complete"), None);
     }
 }

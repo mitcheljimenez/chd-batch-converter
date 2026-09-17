@@ -89,8 +89,12 @@
           </section>
 
           <section id="extract-view" class="view panel-view" style="display:none">
-            <p id="extract-explanation">Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente. El .chd original no se toca ni se borra.</p>
+            <p id="extract-explanation">Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.</p>
             <p id="extract-no-folder-hint">Elige una carpeta primero.</p>
+            <div class="toolbar">
+              <button id="extract-all-btn" disabled>Extraer todos</button>
+            </div>
+            <div id="extract-progress-track" style="display:none"><div id="extract-progress-fill"></div></div>
             <div id="extract-table"></div>
           </section>
 
