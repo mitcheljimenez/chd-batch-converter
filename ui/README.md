@@ -34,6 +34,9 @@ anyway" to proceed.
    you shouldn't normally need to, but it's there as an escape hatch.
 5. Watch live progress; use "Cancelar" to stop early if needed.
 6. Check "Historial" any time for past runs.
+7. Need to undo a conversion (e.g. to recover a `.chd` made unreadable on
+   Android by an old version of this app)? See [Extraer .chd](#extraer-chd)
+   below.
 
 ## Organize multi-disc games
 
