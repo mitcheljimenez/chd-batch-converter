@@ -47,6 +47,28 @@ fn prescan(root: String) -> Vec<scanner::ScannedDisc> {
     scan_folder(std::path::Path::new(&root))
 }
 
+#[tauri::command]
+fn prescan_chds(root: String, app_handle: tauri::AppHandle) -> Result<Vec<extractor::ScannedChd>, String> {
+    let app_dir = resolve_app_config_dir(&app_handle)?;
+    let config = load_config(&app_dir);
+    let chdman_path = resolve_chdman_path(&app_handle, &config)?;
+    Ok(extractor::scan_chds(std::path::Path::new(&root), std::path::Path::new(&chdman_path)))
+}
+
+/// Unpacks a single `.chd` back to its original format (`.cue`+`.bin` for
+/// `kind == "cd"`, `.iso` for `kind == "dvd"`) next to itself. `kind` comes
+/// from a prior `prescan_chds` call, which is the only place that runs
+/// `chdman info` to determine it -- see `extractor::extract_chd`'s own doc
+/// comment for why guessing it here instead would be unsafe.
+#[tauri::command]
+fn extract_chd_command(chd_path: String, kind: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    let app_dir = resolve_app_config_dir(&app_handle)?;
+    let config = load_config(&app_dir);
+    let chdman_path = resolve_chdman_path(&app_handle, &config)?;
+    let output = extractor::extract_chd(std::path::Path::new(&chdman_path), std::path::Path::new(&chd_path), &kind)?;
+    Ok(output.to_string_lossy().to_string())
+}
+
 /// `destination` is where every "<Game>.m3u/" folder is created — always
 /// flattened to one level there, regardless of how deeply the source discs
 /// were nested under `root`.
@@ -86,6 +108,32 @@ fn resolve_app_config_dir(app_handle: &tauri::AppHandle) -> Result<std::path::Pa
 /// CHDMAN_OVERRIDE); this prefix must never survive into that string.
 fn strip_verbatim_prefix(path: &str) -> String {
     path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
+}
+
+/// Resolves the chdman.exe path the same way for every command that needs
+/// one: the user's configured path if set, otherwise the chdman.exe
+/// bundled next to convertir_a_chd.bat. Returns the same stable error
+/// codes (CHDMAN_NOT_CONFIGURED / CHDMAN_NOT_FOUND:<path>) regardless of
+/// caller, since the frontend's i18n.js translates them by exact string.
+fn resolve_chdman_path(app_handle: &tauri::AppHandle, config: &Config) -> Result<String, String> {
+    let chdman_path = if config.chdman_path.is_empty() {
+        let fallback = app_handle
+            .path()
+            .resolve("build-assets/chdman.exe", tauri::path::BaseDirectory::Resource)
+            .map_err(|_| "CHDMAN_NOT_CONFIGURED".to_string())?;
+        if !fallback.exists() {
+            return Err("CHDMAN_NOT_CONFIGURED".to_string());
+        }
+        strip_verbatim_prefix(&fallback.to_string_lossy())
+    } else {
+        strip_verbatim_prefix(&config.chdman_path)
+    };
+
+    if !std::path::Path::new(&chdman_path).exists() {
+        return Err(format!("CHDMAN_NOT_FOUND:{}", chdman_path));
+    }
+
+    Ok(chdman_path)
 }
 
 #[tauri::command]
@@ -269,25 +317,7 @@ fn start_conversion(
 
     let app_dir = resolve_app_config_dir(&app_handle)?;
     let config = load_config(&app_dir);
-
-    // Pre-run guards (spec): the configured path must exist, and an unset path
-    // falls back to a chdman.exe bundled next to convertir_a_chd.bat.
-    let chdman_path = if config.chdman_path.is_empty() {
-        let fallback = app_handle
-            .path()
-            .resolve("build-assets/chdman.exe", tauri::path::BaseDirectory::Resource)
-            .map_err(|_| "CHDMAN_NOT_CONFIGURED".to_string())?;
-        if !fallback.exists() {
-            return Err("CHDMAN_NOT_CONFIGURED".to_string());
-        }
-        strip_verbatim_prefix(&fallback.to_string_lossy())
-    } else {
-        strip_verbatim_prefix(&config.chdman_path)
-    };
-
-    if !std::path::Path::new(&chdman_path).exists() {
-        return Err(format!("CHDMAN_NOT_FOUND:{}", chdman_path));
-    }
+    let chdman_path = resolve_chdman_path(&app_handle, &config)?;
 
     let script_path = app_handle
         .path()
@@ -429,6 +459,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             prescan,
+            prescan_chds,
+            extract_chd_command,
             organize_multidisc,
             move_chd_files,
             get_config,

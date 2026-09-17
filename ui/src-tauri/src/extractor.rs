@@ -12,7 +12,11 @@ pub struct ScannedChd {
 
 /// Recursively finds every `.chd` under `root` and classifies each as
 /// "cd", "dvd", or "unknown" by running `chdman info` on it (see
-/// `classify_chd_info`).
+/// `classify_chd_info`). Caller must have already verified `chdman_path`
+/// exists (as `resolve_chdman_path` in lib.rs does before this is ever
+/// called): a missing/misconfigured chdman would otherwise make `chdman
+/// info` fail to spawn for every single `.chd` found, silently collapsing
+/// the whole scan to "unknown" instead of surfacing the real problem.
 pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
     let mut results = Vec::new();
     for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
