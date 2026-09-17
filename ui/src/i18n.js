@@ -72,6 +72,8 @@ const translations = {
     extractKindUnknown: "Desconocido",
     extractDone: (path) => `Extraído: ${path}`,
     extractFailed: (err) => `No se pudo extraer: ${err}`,
+    overrideFormatDvd: "DVD (zlib)",
+    overrideFormatCd: "CD",
     updateNoticeAuto: (version) =>
       `Hay una actualización disponible (v${version}). Se va a instalar automáticamente.`,
     updateDownloading: (version, pct) => `Descargando actualización v${version}... ${pct}%`,
@@ -168,6 +170,8 @@ const translations = {
     extractKindUnknown: "Unknown",
     extractDone: (path) => `Extracted: ${path}`,
     extractFailed: (err) => `Could not extract: ${err}`,
+    overrideFormatDvd: "DVD (zlib)",
+    overrideFormatCd: "CD",
     updateNoticeAuto: (version) =>
       `An update is available (v${version}). It will be installed automatically.`,
     updateDownloading: (version, pct) => `Downloading update v${version}... ${pct}%`,

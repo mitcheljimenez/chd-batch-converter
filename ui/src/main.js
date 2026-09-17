@@ -9,6 +9,7 @@ let currentFolder = null;
 let organizeDestination = null;
 let moveChdDestination = null;
 let discs = []; // [{ name, folder, kind, status: "pending"|"ok"|"skip"|"fail", message: "" }]
+let formatOverrides = new Set(); // full paths ("folder\\name") the user forced to CD format
 
 const pickFolderBtn = document.getElementById("pick-folder-btn");
 const rescanBtn = document.getElementById("rescan-btn");
@@ -196,6 +197,29 @@ function renderTable() {
         ? t(disc.progressPhase === "verifying" ? "phaseVerifying" : "phaseCompressing", Math.round(disc.progressPercent))
         : disc.message ?? "")
     );
+
+    if (disc.kind === "iso" && disc.status === "pending") {
+      const select = document.createElement("select");
+      select.className = "disc-format-override";
+      const dvdOption = document.createElement("option");
+      dvdOption.value = "dvd";
+      dvdOption.textContent = t("overrideFormatDvd");
+      const cdOption = document.createElement("option");
+      cdOption.value = "cd";
+      cdOption.textContent = t("overrideFormatCd");
+      select.append(dvdOption, cdOption);
+      select.value = formatOverrides.has(`${disc.folder}\\${disc.name}`) ? "cd" : "dvd";
+      select.addEventListener("change", () => {
+        const fullPath = `${disc.folder}\\${disc.name}`;
+        if (select.value === "cd") {
+          formatOverrides.add(fullPath);
+        } else {
+          formatOverrides.delete(fullPath);
+        }
+      });
+      main.appendChild(select);
+    }
+
     row.appendChild(main);
 
     if (disc.status === "pending" && disc.progressPercent !== undefined) {
@@ -288,6 +312,7 @@ moveChdOpenDestBtn.addEventListener("click", async () => {
 
 async function rescan(root) {
   const scanned = await invoke("prescan", { root });
+  formatOverrides = new Set();
   discs = scanned.map((d) => ({ ...d, status: "pending", message: "" }));
   renderTable();
   updateProgress();
@@ -441,7 +466,7 @@ convertBtn.addEventListener("click", async () => {
   progressTrack.style.display = "block";
   progressFill.style.width = "0%";
   try {
-    await invoke("start_conversion", { root: currentFolder });
+    await invoke("start_conversion", { root: currentFolder, formatOverrides: Array.from(formatOverrides) });
   } catch (err) {
     // A real failure (bad chdman path, spawn error) must not leave the UI
     // stuck in "converting" state forever — revert so the user can fix the
