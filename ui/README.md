@@ -27,7 +27,11 @@ anyway" to proceed.
    default, so this step is optional unless you want to use your own).
 3. Click "Elegir carpeta" and pick your ROMs folder.
 4. On the "Convertir" section, review the detected games, then click
-   "Convertir todo".
+   "Convertir todo". PS2 `.iso` games default to DVD format with `zlib`
+   compression, which plays correctly both on PC (PCSX2) and on Android
+   (NetherSX2/AetherSX2). Each `.iso` row also has a "DVD (zlib)"/"CD"
+   dropdown if you want to force CD format for a specific game instead —
+   you shouldn't normally need to, but it's there as an escape hatch.
 5. Watch live progress; use "Cancelar" to stop early if needed.
 6. Check "Historial" any time for past runs.
 
@@ -56,6 +60,19 @@ This feature is a rewritten, Windows-only take on
 original concept and compatibility research (in particular, that Dolphin
 needs absolute paths while other cores don't). The scanning/grouping logic
 here is a from-scratch Rust implementation, not a port of their script.
+
+## Extraer .chd
+
+The "Extraer .chd" section finds every `.chd` in your chosen folder,
+detects whether each one is CD format (`.bin`/`.cue`) or DVD format
+(`.iso`) by inspecting it with `chdman info`, and lets you unpack it back
+to its original files with a per-row "Extraer" button. This is mainly
+useful for recovering a `.chd` an older version of this app converted with
+`createdvd`'s default Zstandard compression (unreadable by NetherSX2/
+AetherSX2 on Android): extract it back to `.iso`, then re-run "Convertir
+todo" on that folder to get a fresh, DVD-zlib `.chd`. The original `.chd`
+is never deleted or modified — extraction is refused instead of
+overwriting if the destination file already exists.
 
 ## Auto-update
 
