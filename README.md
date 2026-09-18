@@ -32,7 +32,9 @@ generated file.
 
 If you'd rather not use the command line, there's a desktop app with a
 graphical interface (Windows) in [`ui/`](ui/), with folder selection, live
-progress, conversion history, automatic updates, an ES-DE multi-disc
+progress, conversion history, automatic updates, **parallel conversion**
+(several `chdman` processes run at once, one per CPU core, instead of
+converting discs one at a time), an ES-DE multi-disc
 game organizer (credit to
 [ItsRetroPup/ES-DE-Multi-Disc-ROM-Organizer](https://github.com/ItsRetroPup/ES-DE-Multi-Disc-ROM-Organizer)
 for the original concept — see [`ui/README.md`](ui/README.md#organize-multi-disc-games)
@@ -58,25 +60,26 @@ where effort would likely pay off most:
    still shows an "unknown publisher" warning on every fresh install;
    a certificate from a public CA would remove that, at a real
    recurring cost.
-3. **Parallel conversion.** Discs currently convert one at a time;
-   running a few `chdman` processes concurrently would meaningfully
-   speed up large libraries on multi-core machines.
-4. **A "verify only" pass** — re-run `chdman verify` against existing
+3. **A "verify only" pass** — re-run `chdman verify` against existing
    `.chd` files without reconverting or extracting, useful after a drive
    move or to catch bit rot. The desktop app already runs `chdman verify`
    as part of both conversion and extraction; this would add a standalone
    pass over files that aren't otherwise being touched.
-5. **CI smoke tests on every push**, not just the release pipeline —
+4. **CI smoke tests on every push**, not just the release pipeline —
    catch a broken build before it's tagged, not after.
-6. **More languages** if there's demand — the Settings selector already
+5. **More languages** if there's demand — the Settings selector already
    supports adding a language as a self-contained dictionary in
    `ui/src/i18n.js`, so this is mostly translation work, not plumbing.
-7. **A conversion log viewer in the app** — right now a failure only
+6. **A conversion log viewer in the app** — right now a failure only
    shows a short message; being able to expand it to the full
    `conversion_log.txt` for that game would help diagnosing chdman
    errors without leaving the app.
-8. **Config profiles** for people who juggle more than one ROMs
+7. **Config profiles** for people who juggle more than one ROMs
    directory or chdman path (e.g. separate PC and handheld libraries).
+
+Done: **parallel conversion** in the desktop app — see [`ui/README.md`](ui/README.md)
+for details. (The plain `.bat` script above still converts one disc at a
+time; only the desktop app runs several `chdman` processes concurrently.)
 
 ## Tests
 

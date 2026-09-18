@@ -1,4 +1,5 @@
 mod chd_mover;
+mod converter;
 mod extractor;
 mod flattener;
 pub mod log_tail;
@@ -7,36 +8,38 @@ mod scanner;
 mod settings;
 
 use std::os::windows::process::CommandExt;
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
-/// Passed to every child process spawned here (the conversion script,
-/// `tasklist`, `taskkill`) via `.creation_flags(...)`. Without it, each spawn
-/// briefly flashes a new console window, since these are all console-
-/// subsystem programs and the GUI app itself has none for them to inherit.
-/// The `tasklist` liveness poll alone fires every 300ms for the run's whole
-/// duration, so this is the difference between one long conversion and a
-/// strobe of terminal windows.
+/// Passed to every child process spawned here (`chdman`, `taskkill`) via
+/// `.creation_flags(...)`. Without it, each spawn briefly flashes a new
+/// console window, since these are all console-subsystem programs and the
+/// GUI app itself has none for them to inherit -- and conversion alone can
+/// spawn several `chdman` processes at once (see `converter::worker_count`),
+/// so this is the difference between one quiet run and a strobe of terminal
+/// windows.
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use chd_mover::{move_chd_files as run_move_chd_files, MoveChdSummary};
 use flattener::{flatten_folders as run_flatten_folders, FlattenSummary};
-use log_tail::{parse_log_line, LogTailer};
 use organizer::{organize_multidisc as run_organize_multidisc, OrganizeSummary};
 use scanner::scan_folder;
 use settings::{append_history, load_config, load_history, save_config, Config, RunRecord};
 
-/// The running child (if any) and the "user pressed cancel" flag. Both halves
-/// are `Arc`-wrapped so the background tail thread can share them with the
-/// command handlers — in particular so the thread can clear the child slot on
-/// its own exit path instead of leaving a stale `Child` behind (whose PID
-/// could later be reused by an unrelated process and killed by a cancel).
-struct RunState(Arc<Mutex<Option<Child>>>, Arc<AtomicBool>);
+/// Whether a conversion is currently running (`.0`, `swap`-guarded the same
+/// way `ExtractState` is), the "user pressed cancel" flag (`.1`), and the
+/// PIDs of every `chdman` process any conversion worker currently has in
+/// flight (`.2`) -- unlike the old single-`.bat`-child design, several
+/// `chdman` processes can be running at once (one per `converter::
+/// worker_count` worker), so `cancel_conversion` needs all of their PIDs,
+/// not just one. A worker registers its own PID right after spawning and
+/// removes it once that `chdman` invocation exits, so this only ever holds
+/// PIDs that are (as far as this process knows) still alive.
+struct RunState(Arc<AtomicBool>, Arc<AtomicBool>, Arc<Mutex<Vec<u32>>>);
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -88,9 +91,8 @@ struct ExtractAllFinished {
 }
 
 /// Whether an `extract` run is currently in flight. Separate from `RunState`
-/// (the conversion script's own child-process tracking) since extraction
-/// never runs through `convertir_a_chd.bat` -- each item is a direct chdman
-/// invocation from a background thread, not a single trackable `Child`.
+/// since extraction always runs one item at a time from a single background
+/// thread, unlike conversion's pool of `converter::worker_count` workers.
 struct ExtractState(Arc<AtomicBool>);
 
 /// Unpacks every `.chd` in `items` back to its original format (`.cue`+
@@ -292,14 +294,18 @@ fn get_history(app_handle: tauri::AppHandle) -> Vec<RunRecord> {
 #[tauri::command]
 fn cancel_conversion(state: tauri::State<RunState>) -> Result<(), String> {
     state.1.store(true, Ordering::SeqCst);
-    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(child) = guard.as_mut() {
-        let pid = child.id();
+    // Kill every chdman process any worker currently has in flight -- there
+    // can be several at once (one per converter::worker_count worker),
+    // unlike the old single-.bat-child design. Draining the vec here (rather
+    // than just reading it) means a worker that's mid-registration for its
+    // *next* item after this point still sees the cancelled flag above and
+    // stops on its own before spawning another.
+    let pids: Vec<u32> = std::mem::take(&mut *state.2.lock().map_err(|e| e.to_string())?);
+    for pid in pids {
         let _ = Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
-        *guard = None;
     }
     Ok(())
 }
@@ -349,7 +355,7 @@ async fn check_for_update(
 /// prior check_for_update call. Does NOT restart the app — the caller shows
 /// the release notes first (see UpdateSummary.notes) and then invokes
 /// restart_app once the user has dismissed that dialog. Refuses while a
-/// conversion is in flight (RunState.0 is Some) rather than killing a
+/// conversion is in flight (RunState.0 is true) rather than killing a
 /// possibly hours-long batch job out from under the user — the caller is
 /// expected to retry this on the next check (app start or the manual
 /// button) once the run finishes.
@@ -358,11 +364,8 @@ async fn install_update(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, RunState>,
 ) -> Result<(), String> {
-    {
-        let guard = state.0.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            return Err("UPDATE_DEFERRED_CONVERSION_IN_PROGRESS".to_string());
-        }
+    if state.0.load(Ordering::SeqCst) {
+        return Err("UPDATE_DEFERRED_CONVERSION_IN_PROGRESS".to_string());
     }
 
     let updater = app_handle.updater().map_err(|e| e.to_string())?;
@@ -404,6 +407,23 @@ fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
 }
 
+/// Converts every eligible disc under `root` in parallel, one `chdman`
+/// process per available CPU core (see `converter::worker_count`) --
+/// replacing the old approach of shelling out to `convertir_a_chd.bat`,
+/// which only ever ran one `chdman` at a time. `format_overrides` is the
+/// full path (as reported by `prescan`, `folder + separator + name`) of
+/// every `.iso` the user forced to convert as CD instead of DVD.
+///
+/// Emits the exact same events the old `.bat`-tailing implementation did
+/// (`disc-progress`, `disc-updated`, `run-finished`), so the frontend needs
+/// no changes: `disc-progress`/`disc-updated` carry the disc's own path
+/// directly (no more inferring it from a chdman "Input file:" line, since
+/// this path calls chdman itself and already knows it).
+///
+/// `RunRecord.skipped` is always 0 here: unlike the `.bat`'s own from-
+/// scratch filesystem walk, this queues exactly what `scanner::scan_folder`
+/// returns, which already excludes discs with an existing `.chd` -- there's
+/// nothing left to discover as "skipped" once conversion starts.
 #[tauri::command]
 fn start_conversion(
     window: tauri::Window,
@@ -412,18 +432,11 @@ fn start_conversion(
     format_overrides: Vec<String>,
     state: tauri::State<RunState>,
 ) -> Result<(), String> {
-    // Reject a second run while one is already in flight, BEFORE touching the
-    // cancelled flag below. Two rapid clicks can fire start_conversion twice
-    // inside one IPC round-trip; the second run's log-file deletion below
-    // would truncate the first tailer's view, and state.0 would only
-    // remember the second Child — orphaning the first process with no UI way
-    // to cancel it. Checking this first also avoids clobbering the flag (see
-    // next comment) for a call that's about to bail out anyway.
-    {
-        let guard = state.0.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            return Err("CONVERSION_IN_PROGRESS".to_string());
-        }
+    // swap(true) both checks and claims the "a run is in flight" slot
+    // atomically, so two rapid clicks can't both pass the check and start
+    // two overlapping runs.
+    if state.0.swap(true, Ordering::SeqCst) {
+        return Err("CONVERSION_IN_PROGRESS".to_string());
     }
 
     // Reset the cancelled flag before anything else that follows (including
@@ -434,148 +447,128 @@ fn start_conversion(
     // cancelled run as cancelled: false.
     state.1.store(false, Ordering::SeqCst);
 
-    let app_dir = resolve_app_config_dir(&app_handle)?;
+    let app_dir = match resolve_app_config_dir(&app_handle) {
+        Ok(dir) => dir,
+        Err(e) => {
+            state.0.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
+    };
     let config = load_config(&app_dir);
-    let chdman_path = resolve_chdman_path(&app_handle, &config)?;
+    let chdman_path = match resolve_chdman_path(&app_handle, &config) {
+        Ok(path) => path,
+        Err(e) => {
+            state.0.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
+    };
 
-    let script_path = app_handle
-        .path()
-        .resolve("build-assets/convertir_a_chd.bat", tauri::path::BaseDirectory::Resource)
-        .map_err(|_| "SCRIPT_NOT_FOUND".to_string())?;
+    let discs = scan_folder(std::path::Path::new(&root));
+    let overrides: std::collections::HashSet<String> = format_overrides.into_iter().collect();
+    let worker_total = converter::worker_count(discs.len());
+    let queue = Arc::new(Mutex::new(std::collections::VecDeque::from(discs)));
 
-    let log_path = std::path::Path::new(&root).join("conversion_log.txt");
-    let _ = std::fs::remove_file(&log_path); // start each run from a clean log for the tailer's offset to make sense
+    let converted = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let failed = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
-    // Same clean-slate-per-run treatment as conversion_log.txt above: a
-    // stale overrides file from a previous run must never leak into this
-    // one. Absent when format_overrides is empty (the common case) so
-    // FORMAT_OVERRIDES stays unset and convertir_a_chd.bat's existing
-    // "unset means no overrides" behavior applies unchanged.
-    let overrides_path = std::path::Path::new(&root).join("format_overrides.txt");
-    let _ = std::fs::remove_file(&overrides_path);
-    if !format_overrides.is_empty() {
-        // Every line, including the LAST one, must end in "\r\n": findstr
-        // /X (which convertir_a_chd.bat uses to match override lines)
-        // requires CRLF after a line to match it at all -- verified
-        // directly, a final line missing the trailing "\r\n" silently
-        // fails to match, which a plain .join("\r\n") would produce. Not
-        // just LF-vs-CRLF (see the FORMAT_OVERRIDES test fixture's commit
-        // message for that half of this gotcha).
-        let contents: String = format_overrides.iter().map(|p| format!("{}=cd\r\n", p)).collect();
-        std::fs::write(&overrides_path, contents).map_err(|e| e.to_string())?;
-    }
-
-    let mut cmd = Command::new(&script_path);
-    cmd.arg(&root)
-        .env("CHDMAN_OVERRIDE", &chdman_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW);
-    if !format_overrides.is_empty() {
-        cmd.env("FORMAT_OVERRIDES", &overrides_path);
-    }
-
-    let child = cmd.spawn().map_err(|e| e.to_string())?;
-    let pid = child.id();
-    *state.0.lock().map_err(|e| e.to_string())? = Some(child);
-
+    let running_flag = state.0.clone();
     let cancelled_flag = state.1.clone();
-    let child_slot = state.0.clone();
+    let active_pids = state.2.clone();
     let root_for_thread = root.clone();
 
     thread::spawn(move || {
-        let mut tailer = LogTailer::new(log_path.clone());
-        let mut converted = 0u32;
-        let mut skipped = 0u32;
-        let mut failed = 0u32;
-        // Remembers the most recent "Input file:" line chdman printed, since
-        // its own "Compressing/Verifying, X% complete" progress lines don't
-        // repeat the filename.
-        let mut current_file: Option<String> = None;
+        let mut handles = Vec::with_capacity(worker_total);
+        for _ in 0..worker_total {
+            let queue = queue.clone();
+            let chdman_path = chdman_path.clone();
+            let overrides = overrides.clone();
+            let window = window.clone();
+            let cancelled_flag = cancelled_flag.clone();
+            let active_pids = active_pids.clone();
+            let converted = converted.clone();
+            let failed = failed.clone();
 
-        let handle_line = |line: &str,
-                                current_file: &mut Option<String>,
-                                converted: &mut u32,
-                                skipped: &mut u32,
-                                failed: &mut u32| {
-            if let Some(path) = log_tail::parse_input_file_line(line) {
-                *current_file = Some(path);
-                return;
-            }
-            if let Some(cur) = current_file.as_deref() {
-                if let Some(progress) = log_tail::parse_progress_line(line, cur) {
-                    let _ = window.emit("disc-progress", &progress);
-                    return;
+            handles.push(thread::spawn(move || loop {
+                if cancelled_flag.load(Ordering::SeqCst) {
+                    break;
                 }
-            }
-            if let Some(event) = parse_log_line(line) {
-                match event.status {
-                    log_tail::DiscStatus::Ok => *converted += 1,
-                    log_tail::DiscStatus::Skip => *skipped += 1,
-                    log_tail::DiscStatus::Fail => *failed += 1,
-                }
-                *current_file = None;
-                let _ = window.emit("disc-updated", &event);
-            }
-        };
+                let Some(disc) = queue.lock().unwrap().pop_front() else {
+                    break;
+                };
 
-        loop {
-            if let Ok(lines) = tailer.read_new_lines() {
-                for line in lines {
-                    handle_line(&line, &mut current_file, &mut converted, &mut skipped, &mut failed);
-                }
-            }
+                let disc_path = std::path::Path::new(&disc.folder).join(&disc.name);
+                let disc_path_str = disc_path.to_string_lossy().to_string();
+                let force_cd = disc.kind == "iso" && overrides.contains(&disc_path_str);
+                let progress_window = window.clone();
+                let progress_path = disc_path_str.clone();
 
-            // Stop when the process has exited AND we've drained the log.
-            // A lightweight "is this PID still alive" check via tasklist,
-            // since std::process::Child doesn't expose non-blocking wait
-            // across a Mutex boundary cleanly here. Only a successful
-            // tasklist invocation whose output omits the PID counts as
-            // "not running" — if tasklist itself fails to run (transient
-            // spawn failure), assume the child is still running and retry
-            // on the next poll, rather than truncating the tail early.
-            let still_running = match Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {}", pid)])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output()
-            {
-                Ok(output) => String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()),
-                Err(_) => true,
-            };
+                let result = converter::convert_disc(
+                    std::path::Path::new(&chdman_path),
+                    &disc_path,
+                    &disc.kind,
+                    force_cd,
+                    &active_pids,
+                    |phase, percent| {
+                        let _ = progress_window.emit(
+                            "disc-progress",
+                            log_tail::ProgressEvent {
+                                path: progress_path.clone(),
+                                phase: phase.to_string(),
+                                percent,
+                            },
+                        );
+                    },
+                );
 
-            if !still_running {
-                // One final drain in case the process wrote its last lines
-                // between our last read and it exiting.
-                if let Ok(lines) = tailer.read_new_lines() {
-                    for line in lines {
-                        handle_line(&line, &mut current_file, &mut converted, &mut skipped, &mut failed);
+                let event = match result {
+                    Ok(_) => {
+                        converted.fetch_add(1, Ordering::SeqCst);
+                        log_tail::LogEvent {
+                            status: log_tail::DiscStatus::Ok,
+                            path: disc_path_str,
+                            message: "convertido y verificado".to_string(),
+                        }
                     }
-                }
-                // The process is gone: clear the shared slot so a later
-                // cancel_conversion can't taskkill a stale PID that Windows
-                // may since have recycled onto an unrelated process. Only on
-                // this exit path — while the loop is still polling, the slot
-                // must keep the live Child so cancel can reach it.
-                if let Ok(mut guard) = child_slot.lock() {
-                    *guard = None;
-                }
-                break;
-            }
+                    // A cancellation shows up as the same plain failure a
+                    // genuinely broken conversion would (the taskkill'd
+                    // chdman process just exits non-zero) -- distinguished
+                    // here by checking the flag rather than the error
+                    // string, so a real failure racing with cancellation
+                    // is never misreported as one.
+                    Err(_) if cancelled_flag.load(Ordering::SeqCst) => break,
+                    Err(e) => {
+                        failed.fetch_add(1, Ordering::SeqCst);
+                        let message = if e == "CONVERT_VERIFY_FAILED" {
+                            "convertido pero VERIFY FALLO"
+                        } else {
+                            "fallo la conversion"
+                        };
+                        log_tail::LogEvent {
+                            status: log_tail::DiscStatus::Fail,
+                            path: disc_path_str,
+                            message: message.to_string(),
+                        }
+                    }
+                };
+                let _ = window.emit("disc-updated", event);
+            }));
+        }
 
-            thread::sleep(Duration::from_millis(300));
+        for handle in handles {
+            let _ = handle.join();
         }
 
         let record = RunRecord {
             timestamp: chrono_like_timestamp(),
             folder: root_for_thread,
-            converted,
-            skipped,
-            failed,
+            converted: converted.load(Ordering::SeqCst),
+            skipped: 0,
+            failed: failed.load(Ordering::SeqCst),
             cancelled: cancelled_flag.load(Ordering::SeqCst),
         };
         let _ = append_history(&app_dir, record.clone());
         let _ = window.emit("run-finished", &record);
+        running_flag.store(false, Ordering::SeqCst);
     });
 
     Ok(())
@@ -594,8 +587,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(RunState(
-            Arc::new(Mutex::new(None)),
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(Vec::new())),
         ))
         .manage(ExtractState(Arc::new(AtomicBool::new(false))))
         .invoke_handler(tauri::generate_handler![
@@ -649,28 +643,31 @@ mod update_guard_tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
 
-    // These test the guard logic in isolation (a live Child can't be
-    // constructed in a unit test without actually spawning a process), by
-    // exercising the same "is a conversion running" check the commands use:
-    // state.0.lock().unwrap().is_some().
+    // These test the guard logic in isolation (a live chdman process can't
+    // be spawned in a unit test), by exercising the same "is a conversion
+    // running" check the commands use: state.0.load(...).
+
+    fn fresh_state() -> RunState {
+        RunState(Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(Vec::new())))
+    }
 
     #[test]
     fn no_running_conversion_is_not_blocked() {
-        let state = RunState(Arc::new(Mutex::new(None)), Arc::new(AtomicBool::new(false)));
-        let guard = state.0.lock().unwrap();
-        assert!(guard.is_none(), "expected no conversion in progress");
+        let state = fresh_state();
+        assert!(!state.0.load(std::sync::atomic::Ordering::SeqCst), "expected no conversion in progress");
     }
 
     #[test]
     fn install_update_guard_matches_run_state_shape() {
         // Documents the exact check install_update performs before calling
-        // the plugin's downloader: state.0.lock() must yield None. This
-        // doesn't spawn a real Child (that requires a real OS process and
-        // is exercised by the existing start_conversion_smoke.rs
-        // integration test instead) — it locks in the guard's shape so a
-        // future refactor of RunState's fields doesn't silently drop it.
-        let state = RunState(Arc::new(Mutex::new(None)), Arc::new(AtomicBool::new(false)));
-        let is_blocked = state.0.lock().map(|g| g.is_some()).unwrap_or(false);
+        // the plugin's downloader: state.0.load(...) must be false. This
+        // doesn't spawn a real chdman process (that requires a real OS
+        // process and is exercised by the existing
+        // start_conversion_smoke.rs integration test instead) — it locks in
+        // the guard's shape so a future refactor of RunState's fields
+        // doesn't silently drop it.
+        let state = fresh_state();
+        let is_blocked = state.0.load(std::sync::atomic::Ordering::SeqCst);
         assert!(!is_blocked);
     }
 }

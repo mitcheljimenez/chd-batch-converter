@@ -32,6 +32,9 @@ anyway" to proceed.
    (NetherSX2/AetherSX2). Each `.iso` row also has a "DVD (zlib)"/"CD"
    dropdown if you want to force CD format for a specific game instead —
    you shouldn't normally need to, but it's there as an escape hatch.
+   Conversion runs **in parallel**: one `chdman` process per CPU core
+   converts at once, instead of one disc at a time, so a large library
+   finishes noticeably faster on a multi-core machine.
 5. Watch live progress; use "Cancelar" to stop early if needed.
 6. Check "Historial" any time for past runs.
 7. Need to undo a conversion (e.g. to recover a `.chd` made unreadable on
