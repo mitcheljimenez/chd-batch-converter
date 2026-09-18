@@ -74,6 +74,7 @@ const languageLabelText = document.getElementById("language-label-text");
 const languageSelect = document.getElementById("language-select");
 const checkUpdatesBtn = document.getElementById("check-updates-btn");
 const updateStatus = document.getElementById("update-status");
+const appVersionLabel = document.getElementById("app-version-label");
 
 const updateOverlay = document.getElementById("update-overlay");
 const updateOverlayText = document.getElementById("update-overlay-text");
@@ -152,6 +153,15 @@ navSettings.addEventListener("click", () => showView("settings"));
 
 // Re-applies every static piece of UI text in the current language. Called
 // once at startup (after the persisted language loads) and again whenever
+// Fetched once at startup from Tauri's app API; kept in module state so
+// applyTranslations() can re-render the label's text in the new language
+// without re-invoking the backend every time.
+let appVersion = null;
+
+function updateVersionLabel() {
+  if (appVersion) appVersionLabel.textContent = t("versionLabel", appVersion);
+}
+
 // the user switches languages from the selector.
 function applyTranslations() {
   pickFolderBtn.textContent = t("pickFolder");
@@ -169,6 +179,7 @@ function applyTranslations() {
   languageLabelText.textContent = t("languageLabel");
   saveSettingsBtn.textContent = t("save");
   checkUpdatesBtn.textContent = t("checkUpdates");
+  updateVersionLabel();
   updatePendingLabel();
   organizeExplanation.textContent = t("organizeExplanation");
   storageModePcLabel.textContent = t("storageModePc");
@@ -903,6 +914,7 @@ checkUpdatesBtn.addEventListener("click", async () => {
 (async () => {
   const config = await invoke("get_config");
   setLanguage(config.language);
+  appVersion = await window.__TAURI__.app.getVersion();
   applyTranslations();
   languageSelect.value = config.language;
   autoUpdateCheckbox.checked = config.auto_update_enabled;

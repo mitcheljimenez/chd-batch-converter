@@ -97,6 +97,7 @@ const translations = {
     updateRestartNow: "Reiniciar ahora",
     updateErrorOverlay: (err) => `No se pudo actualizar: ${err}`,
     updateDismiss: "Cerrar",
+    versionLabel: (version) => `Versión instalada: ${version}`,
     errors: {
       CHDMAN_NOT_CONFIGURED: "No se configuró la ruta de chdman.exe",
       CHDMAN_NOT_FOUND: (path) =>
@@ -211,6 +212,7 @@ const translations = {
     updateRestartNow: "Restart now",
     updateErrorOverlay: (err) => `Could not update: ${err}`,
     updateDismiss: "Close",
+    versionLabel: (version) => `Installed version: ${version}`,
     errors: {
       CHDMAN_NOT_CONFIGURED: "chdman.exe path is not configured",
       CHDMAN_NOT_FOUND: (path) =>
