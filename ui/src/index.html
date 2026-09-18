@@ -34,6 +34,7 @@
           <button id="nav-convert" class="nav-item active">Convertir</button>
           <button id="nav-organize" class="nav-item">Organizar multi-disco</button>
           <button id="nav-move-chd" class="nav-item">Mover .chd</button>
+          <button id="nav-flatten" class="nav-item">Aplanar carpetas</button>
           <button id="nav-extract" class="nav-item">Extraer .chd</button>
           <button id="nav-history" class="nav-item">Historial</button>
           <button id="nav-settings" class="nav-item">Configuración</button>
@@ -86,6 +87,12 @@
             </div>
             <button id="run-move-chd-btn" disabled>Mover</button>
             <button id="move-chd-open-dest-btn" class="secondary" style="display:none">Abrir carpeta destino</button>
+          </section>
+
+          <section id="flatten-view" class="view panel-view" style="display:none">
+            <p id="flatten-explanation">Esto va a sacar los archivos de ROMs que están dentro de carpetas y ponerlos directamente en la carpeta elegida, eliminando las carpetas que queden vacías. Se ignoran las carpetas cuyo nombre contiene ".m3u" (juegos multi-disco), que quedan intactas.</p>
+            <p id="flatten-no-folder-hint">Elige una carpeta primero.</p>
+            <button id="run-flatten-btn" disabled>Aplanar</button>
           </section>
 
           <section id="extract-view" class="view panel-view" style="display:none">

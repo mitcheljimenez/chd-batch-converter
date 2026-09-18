@@ -1,5 +1,6 @@
 mod chd_mover;
 mod extractor;
+mod flattener;
 pub mod log_tail;
 mod organizer;
 mod scanner;
@@ -24,6 +25,7 @@ use tauri_plugin_updater::UpdaterExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use chd_mover::{move_chd_files as run_move_chd_files, MoveChdSummary};
+use flattener::{flatten_folders as run_flatten_folders, FlattenSummary};
 use log_tail::{parse_log_line, LogTailer};
 use organizer::{organize_multidisc as run_organize_multidisc, OrganizeSummary};
 use scanner::scan_folder;
@@ -194,6 +196,17 @@ fn organize_multidisc(root: String, destination: String, android_base: Option<St
 #[tauri::command]
 fn move_chd_files(root: String, destination: String) -> Result<MoveChdSummary, String> {
     run_move_chd_files(std::path::Path::new(&root), std::path::Path::new(&destination))
+}
+
+/// Moves every ROM file out of whatever subfolder(s) it's nested under and
+/// directly into `root`, then removes the now-empty subfolders. There's no
+/// separate destination -- unlike `organize_multidisc`/`move_chd_files`,
+/// this flattens `root` in place. Any folder whose name contains ".m3u" is
+/// left completely alone (not descended into, not emptied, not removed),
+/// since those are `organize_multidisc`'s multi-disc game folders.
+#[tauri::command]
+fn flatten_folders(root: String) -> Result<FlattenSummary, String> {
+    run_flatten_folders(std::path::Path::new(&root))
 }
 
 /// Resolves the app's config directory, surfacing a failure as a `Result`
@@ -592,6 +605,7 @@ pub fn run() {
             start_extract_all,
             organize_multidisc,
             move_chd_files,
+            flatten_folders,
             get_config,
             set_config,
             get_history,

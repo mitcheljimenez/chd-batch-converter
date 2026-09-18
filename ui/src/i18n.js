@@ -61,6 +61,17 @@ const translations = {
         : "."),
     moveChdFailed: (err) => `No se pudo mover: ${err}`,
     openDestFolder: "Abrir carpeta destino",
+    navFlatten: "Aplanar carpetas",
+    flattenExplanation:
+      "Esto va a sacar los archivos de ROMs que están dentro de carpetas y ponerlos directamente en la carpeta elegida, eliminando las carpetas que queden vacías. Se ignoran las carpetas cuyo nombre contiene \".m3u\" (juegos multi-disco), que quedan intactas.",
+    flattenNoFolderHint: "Elige una carpeta primero.",
+    runFlatten: "Aplanar",
+    flattenSummary: ({ files_moved, folders_removed, renamed_due_to_collision }) =>
+      `Listo: ${files_moved} archivo(s) movido(s), ${folders_removed} carpeta(s) vacía(s) eliminada(s)` +
+      (renamed_due_to_collision > 0
+        ? `. ${renamed_due_to_collision} se renombraron para no sobrescribir un archivo existente con el mismo nombre.`
+        : "."),
+    flattenFailed: (err) => `No se pudo aplanar: ${err}`,
     navExtract: "Extraer .chd",
     extractExplanation:
       "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.",
@@ -164,6 +175,17 @@ const translations = {
         : "."),
     moveChdFailed: (err) => `Could not move: ${err}`,
     openDestFolder: "Open destination folder",
+    navFlatten: "Flatten folders",
+    flattenExplanation:
+      "This will take ROM files out of whatever folders they're nested in and put them directly in the chosen folder, then remove any folders that end up empty. Folders whose name contains \".m3u\" (multi-disc games) are skipped and left untouched.",
+    flattenNoFolderHint: "Choose a folder first.",
+    runFlatten: "Flatten",
+    flattenSummary: ({ files_moved, folders_removed, renamed_due_to_collision }) =>
+      `Done: ${files_moved} file(s) moved, ${folders_removed} empty folder(s) removed` +
+      (renamed_due_to_collision > 0
+        ? `. ${renamed_due_to_collision} were renamed to avoid overwriting an existing file with the same name.`
+        : "."),
+    flattenFailed: (err) => `Could not flatten: ${err}`,
     navExtract: "Extract .chd",
     extractExplanation:
       "This looks for .chd files in the chosen folder and lets you extract them back to .iso or .bin/.cue, auto-detecting the format and verifying the original .chd after each extraction. The original .chd is never touched or deleted.",

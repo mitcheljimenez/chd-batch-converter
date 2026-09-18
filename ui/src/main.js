@@ -25,11 +25,13 @@ const discTable = document.getElementById("disc-table");
 const navConvert = document.getElementById("nav-convert");
 const navOrganize = document.getElementById("nav-organize");
 const navMoveChd = document.getElementById("nav-move-chd");
+const navFlatten = document.getElementById("nav-flatten");
 const navHistory = document.getElementById("nav-history");
 const navSettings = document.getElementById("nav-settings");
 const convertView = document.getElementById("convert-view");
 const organizeView = document.getElementById("organize-view");
 const moveChdView = document.getElementById("move-chd-view");
+const flattenView = document.getElementById("flatten-view");
 const historyView = document.getElementById("history-view");
 const settingsView = document.getElementById("settings-view");
 
@@ -55,6 +57,9 @@ const moveChdPickDestBtn = document.getElementById("move-chd-pick-dest-btn");
 const moveChdDestLabel = document.getElementById("move-chd-dest-label");
 const runMoveChdBtn = document.getElementById("run-move-chd-btn");
 const moveChdOpenDestBtn = document.getElementById("move-chd-open-dest-btn");
+const flattenExplanation = document.getElementById("flatten-explanation");
+const flattenNoFolderHint = document.getElementById("flatten-no-folder-hint");
+const runFlattenBtn = document.getElementById("run-flatten-btn");
 const navExtract = document.getElementById("nav-extract");
 const extractView = document.getElementById("extract-view");
 const extractExplanation = document.getElementById("extract-explanation");
@@ -83,6 +88,7 @@ const views = {
   convert: convertView,
   organize: organizeView,
   moveChd: moveChdView,
+  flatten: flattenView,
   extract: extractView,
   history: historyView,
   settings: settingsView,
@@ -91,6 +97,7 @@ const navButtons = {
   convert: navConvert,
   organize: navOrganize,
   moveChd: navMoveChd,
+  flatten: navFlatten,
   extract: navExtract,
   history: navHistory,
   settings: navSettings,
@@ -117,6 +124,8 @@ async function showView(name) {
     updateOrganizeAvailability();
   } else if (name === "moveChd") {
     updateMoveChdAvailability();
+  } else if (name === "flatten") {
+    updateFlattenAvailability();
   } else if (name === "extract") {
     // Only re-scan the first time this folder's Extract tab is opened, not
     // on every visit -- otherwise navigating away and back (or just
@@ -136,6 +145,7 @@ async function showView(name) {
 navConvert.addEventListener("click", () => showView("convert"));
 navOrganize.addEventListener("click", () => showView("organize"));
 navMoveChd.addEventListener("click", () => showView("moveChd"));
+navFlatten.addEventListener("click", () => showView("flatten"));
 navExtract.addEventListener("click", () => showView("extract"));
 navHistory.addEventListener("click", () => showView("history"));
 navSettings.addEventListener("click", () => showView("settings"));
@@ -177,6 +187,10 @@ function applyTranslations() {
   moveChdDestLabel.textContent = moveChdDestination ?? t("noDestinationSelected");
   runMoveChdBtn.textContent = t("runMoveChd");
   moveChdOpenDestBtn.textContent = t("openDestFolder");
+  navFlatten.textContent = t("navFlatten");
+  flattenExplanation.textContent = t("flattenExplanation");
+  flattenNoFolderHint.textContent = t("flattenNoFolderHint");
+  runFlattenBtn.textContent = t("runFlatten");
   navExtract.textContent = t("navExtract");
   extractExplanation.textContent = t("extractExplanation");
   extractAllBtn.textContent = t("extractAllBtn");
@@ -287,6 +301,12 @@ function updateMoveChdAvailability() {
   runMoveChdBtn.disabled = !hasFolders;
 }
 
+function updateFlattenAvailability() {
+  const hasFolder = Boolean(currentFolder);
+  flattenNoFolderHint.style.display = hasFolder ? "none" : "block";
+  runFlattenBtn.disabled = !hasFolder;
+}
+
 organizePickDestBtn.addEventListener("click", async () => {
   const selected = await open({ directory: true, multiple: false });
   if (!selected) return;
@@ -322,6 +342,16 @@ moveChdOpenDestBtn.addEventListener("click", async () => {
     await openPath(moveChdDestination);
   } catch (err) {
     alert(translateError(err));
+  }
+});
+
+runFlattenBtn.addEventListener("click", async () => {
+  if (!currentFolder) return;
+  try {
+    const summary = await invoke("flatten_folders", { root: currentFolder });
+    alert(t("flattenSummary", summary));
+  } catch (err) {
+    alert(t("flattenFailed", translateError(err)));
   }
 });
 
@@ -538,6 +568,7 @@ pickFolderBtn.addEventListener("click", async () => {
   folderLabel.textContent = selected;
   updateOrganizeAvailability();
   updateMoveChdAvailability();
+  updateFlattenAvailability();
   rescanBtn.disabled = false;
   convertOpenFolderBtn.disabled = false;
 
