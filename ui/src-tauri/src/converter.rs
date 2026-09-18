@@ -16,6 +16,35 @@ fn should_use_cd(kind: &str, force_cd: bool) -> bool {
     kind == "cue" || force_cd
 }
 
+/// Builds the `createcd`/`createdvd` argument list for converting
+/// `disc_path` to `out`. Always pins `-np 1` (one compression thread) --
+/// see the doc comment on the `-np` push site in `convert_disc` for why:
+/// this crate's own parallelism is one chdman process per core, so letting
+/// each process ALSO spin up its own per-core thread pool would
+/// oversubscribe the CPU by roughly (cores squared) instead of just using
+/// it. Kept as its own pure function so the presence of `-np 1` is
+/// verifiable without spawning chdman.
+fn build_convert_args(kind: &str, force_cd: bool, disc_path: &Path, out: &Path) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = Vec::new();
+    if should_use_cd(kind, force_cd) {
+        args.push("createcd".into());
+    } else {
+        // createdvd defaults to zstd compression, unreadable by
+        // AetherSX2/NetherSX2 on Android -- -c zlib keeps DVD CHDs portable
+        // there. Same rationale as convertir_a_chd.bat's own :process_disc.
+        args.push("createdvd".into());
+        args.push("-c".into());
+        args.push("zlib".into());
+    }
+    args.push("-i".into());
+    args.push(disc_path.as_os_str().to_owned());
+    args.push("-o".into());
+    args.push(out.as_os_str().to_owned());
+    args.push("-np".into());
+    args.push("1".into());
+    args
+}
+
 /// Converts one disc (`.cue` or `.iso`) to a `.chd` next to itself, then
 /// verifies the result, streaming chdman's own progress output through
 /// `on_progress` the same way `extractor::extract_chd_with_progress` does
@@ -41,23 +70,10 @@ pub fn convert_disc(
     mut on_progress: impl FnMut(&str, f32),
 ) -> Result<PathBuf, String> {
     let out = disc_path.with_extension("chd");
-    let use_cd = should_use_cd(kind, force_cd);
-
-    let mut convert_args: Vec<std::ffi::OsString> = Vec::new();
-    if use_cd {
-        convert_args.push("createcd".into());
-    } else {
-        // createdvd defaults to zstd compression, unreadable by
-        // AetherSX2/NetherSX2 on Android -- -c zlib keeps DVD CHDs portable
-        // there. Same rationale as convertir_a_chd.bat's own :process_disc.
-        convert_args.push("createdvd".into());
-        convert_args.push("-c".into());
-        convert_args.push("zlib".into());
-    }
-    convert_args.push("-i".into());
-    convert_args.push(disc_path.as_os_str().to_owned());
-    convert_args.push("-o".into());
-    convert_args.push(out.as_os_str().to_owned());
+    // `verify` has no `-np` equivalent (it isn't in verify's own option
+    // list per chdman's docs), so the thread-oversubscription guard below
+    // only applies to the convert step.
+    let convert_args = build_convert_args(kind, force_cd, disc_path, &out);
 
     run_with_progress(chdman_path, &convert_args, active_pids, &mut on_progress)
         .map_err(|_| "CONVERT_FAILED".to_string())?;
@@ -160,6 +176,49 @@ mod should_use_cd_tests {
     fn an_iso_is_createdvd_unless_forced_to_cd() {
         assert!(!should_use_cd("iso", false));
         assert!(should_use_cd("iso", true));
+    }
+}
+
+#[cfg(test)]
+mod build_convert_args_tests {
+    use super::build_convert_args;
+    use std::path::Path;
+
+    fn args_as_strings(args: &[std::ffi::OsString]) -> Vec<String> {
+        args.iter().map(|a| a.to_string_lossy().to_string()).collect()
+    }
+
+    #[test]
+    fn every_invocation_pins_to_a_single_compression_thread() {
+        // The whole point: this crate parallelizes at the process level (one
+        // chdman per core, see worker_count), so every single chdman process
+        // must be capped to one compression thread of its own -- otherwise
+        // N processes times chdman's own default per-core thread pool would
+        // oversubscribe the CPU by roughly N² instead of just using it.
+        let cue_args = args_as_strings(&build_convert_args("cue", false, Path::new("Game.cue"), Path::new("Game.chd")));
+        assert!(cue_args.windows(2).any(|w| w == ["-np", "1"]), "{:?}", cue_args);
+
+        let iso_args = args_as_strings(&build_convert_args("iso", false, Path::new("Game.iso"), Path::new("Game.chd")));
+        assert!(iso_args.windows(2).any(|w| w == ["-np", "1"]), "{:?}", iso_args);
+    }
+
+    #[test]
+    fn a_cue_uses_createcd() {
+        let args = args_as_strings(&build_convert_args("cue", false, Path::new("Game.cue"), Path::new("Game.chd")));
+        assert_eq!(args[0], "createcd");
+    }
+
+    #[test]
+    fn an_iso_defaults_to_createdvd_with_zlib() {
+        let args = args_as_strings(&build_convert_args("iso", false, Path::new("Game.iso"), Path::new("Game.chd")));
+        assert_eq!(args[0], "createdvd");
+        assert!(args.windows(2).any(|w| w == ["-c", "zlib"]), "{:?}", args);
+    }
+
+    #[test]
+    fn an_iso_forced_to_cd_uses_createcd_instead() {
+        let args = args_as_strings(&build_convert_args("iso", true, Path::new("Game.iso"), Path::new("Game.chd")));
+        assert_eq!(args[0], "createcd");
     }
 }
 
