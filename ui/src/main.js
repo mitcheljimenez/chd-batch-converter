@@ -169,7 +169,7 @@ function applyTranslations() {
   languageLabelText.textContent = t("languageLabel");
   saveSettingsBtn.textContent = t("save");
   checkUpdatesBtn.textContent = t("checkUpdates");
-  discsPendingLabel.textContent = t("discsPendingLabel", discs.length);
+  updatePendingLabel();
   organizeExplanation.textContent = t("organizeExplanation");
   storageModePcLabel.textContent = t("storageModePc");
   storageModeInternalLabel.textContent = t("storageModeInternal");
@@ -263,6 +263,19 @@ function renderTable() {
 
     discTable.appendChild(row);
   }
+}
+
+// How many discs are still pending conversion, i.e. haven't reached a
+// terminal status ("ok"/"skip"/"fail"/"cancel") yet -- unlike `discs.length`
+// (the total scanned), this drops as each disc finishes so the "N files to
+// convert" label stays accurate mid-run instead of just showing the count
+// from the initial scan forever.
+function pendingDiscCount() {
+  return discs.filter((d) => d.status === "pending").length;
+}
+
+function updatePendingLabel() {
+  discsPendingLabel.textContent = t("discsPendingLabel", pendingDiscCount());
 }
 
 function updateProgress() {
@@ -361,7 +374,7 @@ async function rescan(root) {
   discs = scanned.map((d) => ({ ...d, status: "pending", message: "" }));
   renderTable();
   updateProgress();
-  discsPendingLabel.textContent = t("discsPendingLabel", discs.length);
+  updatePendingLabel();
   convertBtn.disabled = discs.length === 0;
 }
 
@@ -701,6 +714,7 @@ listen("disc-updated", (event) => {
     disc.message = message;
     renderTable();
     updateProgress();
+    updatePendingLabel();
   }
 });
 
@@ -713,6 +727,7 @@ listen("run-finished", (event) => {
     }
     renderTable();
     updateProgress();
+    updatePendingLabel();
   }
   convertBtn.style.display = "inline-block";
   // Re-enable: the click handler disabled it synchronously at run start.

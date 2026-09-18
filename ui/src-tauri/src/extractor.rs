@@ -2,6 +2,8 @@ use std::io::Read;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
 use walkdir::WalkDir;
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
@@ -125,13 +127,18 @@ pub fn extract_chd_with_progress(
     Ok(output)
 }
 
-/// Runs `chdman <subcommand> -i chd_path [-o output]`, streaming its stdout
-/// line-by-line (splitting on chdman's bare '\r' progress-overwrite trick
-/// the same way `log_tail::LogTailer` does for the conversion script) and
-/// calling `on_progress(phase, percent)` for every "Extracting, X%
-/// complete..." or "Verifying, X% complete..." line it prints. Returns
-/// `Err(())` on a spawn failure or non-zero exit; the caller maps that to
-/// the specific stable error code for its context (extraction vs. verify).
+/// Runs `chdman <subcommand> -i chd_path [-o output]`, streaming its output
+/// line-by-line (splitting on chdman's bare '\r' progress-overwrite trick)
+/// and calling `on_progress(phase, percent)` for every "Extracting, X%
+/// complete..." or "Verifying, X% complete..." line it prints. chdman writes
+/// its progress lines to **stderr**, flushing on every call (per its own
+/// source: `progress()` writes to `std::cerr`) -- stdout only carries the
+/// occasional summary line, so both streams are piped and read on their own
+/// thread, feeding a shared channel this function drains on the caller's
+/// thread (since `on_progress` closes over a `tauri::Window` and isn't
+/// required to be `Send`). Returns `Err(())` on a spawn failure or non-zero
+/// exit; the caller maps that to the specific stable error code for its
+/// context (extraction vs. verify).
 fn run_with_progress(
     chdman_path: &Path,
     subcommand: &str,
@@ -147,16 +154,43 @@ fn run_with_progress(
 
     let mut child = command
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .creation_flags(crate::CREATE_NO_WINDOW)
         .spawn()
         .map_err(|_| ())?;
 
-    let mut stdout = child.stdout.take().ok_or(())?;
+    let stdout = child.stdout.take().ok_or(())?;
+    let stderr = child.stderr.take().ok_or(())?;
+
+    let (tx, rx) = mpsc::channel();
+    let tx_stderr = tx.clone();
+    let stdout_reader = thread::spawn(move || stream_phase_progress(stdout, tx));
+    let stderr_reader = thread::spawn(move || stream_phase_progress(stderr, tx_stderr));
+
+    for (phase, percent) in rx {
+        on_progress(phase, percent);
+    }
+
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
+
+    let status = child.wait().map_err(|_| ())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+/// Reads `reader` to EOF, parsing out "Extracting/Verifying, X% complete"
+/// lines and sending each as `(phase, percent)` through `tx`. Runs on its
+/// own thread (see `run_with_progress`) so it never has to wait its turn
+/// behind the other stream.
+fn stream_phase_progress(mut reader: impl Read, tx: mpsc::Sender<(&'static str, f32)>) {
     let mut partial = String::new();
     let mut chunk = [0u8; 4096];
     loop {
-        let n = stdout.read(&mut chunk).unwrap_or(0);
+        let n = reader.read(&mut chunk).unwrap_or(0);
         if n == 0 {
             break;
         }
@@ -165,21 +199,14 @@ fn run_with_progress(
         let mut lines: Vec<&str> = normalized.split('\n').collect();
         // The last element is whatever came after the final '\n' (possibly
         // empty) -- an incomplete line still being written, held back for
-        // the next read the same way LogTailer holds its `partial`.
+        // the next read.
         let tail = lines.pop().unwrap_or("").to_string();
         for line in lines {
-            if let Some((phase, percent)) = parse_phase_progress(line) {
-                on_progress(phase, percent);
+            if let Some(parsed) = parse_phase_progress(line) {
+                let _ = tx.send(parsed);
             }
         }
         partial = tail;
-    }
-
-    let status = child.wait().map_err(|_| ())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(())
     }
 }
 
