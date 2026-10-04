@@ -152,8 +152,8 @@ button.secondary { background: var(--surface-hover); }
 }
 
 .disc-status-icon { width: 20px; text-align: center; }
-.disc-name { flex: 1; }
-.disc-message { color: var(--text-dim); font-size: 12px; }
+.disc-name { flex: 1; min-width: 35%; }
+.disc-message { color: var(--text-dim); font-size: 12px; text-align: right; }
 
 .disc-progress-track {
   height: 4px;
@@ -361,3 +361,4 @@ button.secondary { background: var(--surface-hover); }
 }
 
 #trash-originals-row { color: var(--text-dim); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+#savings-label { color: var(--ok); font-size: 13px; margin: 0; }

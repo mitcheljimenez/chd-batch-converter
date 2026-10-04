@@ -96,7 +96,10 @@ You only need to do this once; later auto-updates open normally.
    tracks, or the `.iso`) go to the system trash / Recycle Bin, never
    deleted outright, so you can still restore them. Off by default, and a
    disc that fails or is cancelled always keeps its originals.
-5. Watch live progress; use "Cancelar" to stop early if needed.
+5. Watch live progress; use "Cancelar" to stop early if needed. Each
+   converted disc shows its size before and after (e.g. `700 MB → 450 MB
+   (-36 %)`), and the run ends with the total space saved, which is also
+   kept in "Historial".
 6. Check "Historial" any time for past runs.
 7. Need to undo a conversion (e.g. to recover a `.chd` made unreadable on
    Android by an old version of this app)? See [Extraer .chd](#extraer-chd)

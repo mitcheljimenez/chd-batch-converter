@@ -1,4 +1,12 @@
-import { t, setLanguage, setPlatform, chdmanInstallCommand, translateError } from "./i18n.js";
+import {
+  t,
+  setLanguage,
+  setPlatform,
+  chdmanInstallCommand,
+  translateError,
+  formatBytes,
+  formatPercentChange,
+} from "./i18n.js";
 
 const { invoke } = window.__TAURI__.core;
 const { open } = window.__TAURI__.dialog;
@@ -73,6 +81,7 @@ const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
 const parallelConversionCheckbox = document.getElementById("parallel-conversion-checkbox");
 const trashOriginalsCheckbox = document.getElementById("trash-originals-checkbox");
+const savingsLabel = document.getElementById("savings-label");
 const trashOriginalsLabelText = document.getElementById("trash-originals-label-text");
 const parallelConversionLabelText = document.getElementById("parallel-conversion-label-text");
 const parallelConversionHint = document.getElementById("parallel-conversion-hint");
@@ -700,6 +709,7 @@ convertBtn.addEventListener("click", async () => {
   // The backend reads this once when the run starts; locking it makes clear
   // a mid-run change wouldn't apply until the next run.
   trashOriginalsCheckbox.disabled = true;
+  savingsLabel.style.display = "none";
   convertBtn.style.display = "none";
   cancelBtn.style.display = "inline-block";
   rescanBtn.disabled = true;
@@ -764,11 +774,18 @@ listen("disc-progress", (event) => {
 });
 
 listen("disc-updated", (event) => {
-  const { status, path, message, note } = event.payload;
+  const { status, path, message, note, original_bytes, chd_bytes } = event.payload;
   const disc = matchDiscByPath(path);
   if (disc) {
     disc.status = status.toLowerCase(); // Rust enum serializes as "Ok" | "Skip" | "Fail"
-    disc.message = note ? `${message} · ${t(`note${note}`)}` : message;
+    const parts = [message];
+    if (original_bytes != null && chd_bytes != null) {
+      parts.push(
+        t("sizeChange", formatBytes(original_bytes), formatBytes(chd_bytes), formatPercentChange(original_bytes, chd_bytes)),
+      );
+    }
+    if (note) parts.push(t(`note${note}`));
+    disc.message = parts.join(" · ");
     renderTable();
     updateProgress();
     updatePendingLabel();
@@ -777,6 +794,7 @@ listen("disc-updated", (event) => {
 
 listen("run-finished", (event) => {
   invalidateChdScan();
+  showRunSavings(event?.payload);
   // A cancelled run leaves discs that were never reached stuck on the pending
   // "•" forever, which reads as "still working". Mark them as cancelled.
   if (event?.payload?.cancelled) {
@@ -839,6 +857,23 @@ languageSelect.addEventListener("change", async () => {
   await saveConfig();
 });
 
+// Total space freed by the run that just finished (over the discs it
+// converted). Hidden when nothing was converted.
+function showRunSavings(record) {
+  const before = record?.original_bytes ?? 0;
+  const after = record?.chd_bytes ?? 0;
+  if (before <= 0) {
+    savingsLabel.style.display = "none";
+    return;
+  }
+  savingsLabel.textContent = t(
+    "runSavings",
+    formatBytes(before - after),
+    formatPercentChange(before, after).replace(/^[-+−]/, ""),
+  );
+  savingsLabel.style.display = "block";
+}
+
 async function renderHistory() {
   const history = await invoke("get_history");
   historyPanel.innerHTML = "";
@@ -846,7 +881,8 @@ async function renderHistory() {
     const date = new Date(Number(run.timestamp) * 1000).toLocaleString();
     const status = run.cancelled
       ? t("cancelled")
-      : t("historySummary", { converted: run.converted, skipped: run.skipped, failed: run.failed });
+      : t("historySummary", { converted: run.converted, skipped: run.skipped, failed: run.failed }) +
+        (run.original_bytes > 0 ? ` · ${t("historySaved", formatBytes(run.original_bytes - run.chd_bytes))}` : "");
     const row = document.createElement("div");
     row.className = "history-row";
     row.append(mk("history-folder", run.folder), mk("", date), mk("", status));

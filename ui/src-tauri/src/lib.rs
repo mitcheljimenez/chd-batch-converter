@@ -470,6 +470,9 @@ struct DiscResult {
     path: String,
     message: String,
     note: Option<&'static str>,
+    /// Size of the original files and of the new .chd, on success only.
+    original_bytes: Option<u64>,
+    chd_bytes: Option<u64>,
 }
 
 /// Converts every eligible disc under `root` in parallel, one `chdman`
@@ -538,6 +541,10 @@ fn start_conversion(
 
     let converted = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let failed = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    // Totals over successfully converted discs only, for the "space saved"
+    // summary and the history entry.
+    let bytes_before = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let bytes_after = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     let running_flag = state.0.clone();
     let cancelled_flag = state.1.clone();
@@ -555,6 +562,8 @@ fn start_conversion(
             let active_pids = active_pids.clone();
             let converted = converted.clone();
             let failed = failed.clone();
+            let bytes_before = bytes_before.clone();
+            let bytes_after = bytes_after.clone();
 
             handles.push(thread::spawn(move || loop {
                 if cancelled_flag.load(Ordering::SeqCst) {
@@ -570,6 +579,7 @@ fn start_conversion(
                 // Listed before converting: the set of files is what the
                 // .cue/.gdi references right now, not after the fact.
                 let original_files = disc_files::disc_files(&disc_path, &disc.kind);
+                let original_size = disc_files::total_size(&original_files);
                 let progress_window = window.clone();
                 let progress_path = disc_path_str.clone();
 
@@ -593,8 +603,11 @@ fn start_conversion(
                 );
 
                 let event = match result {
-                    Ok(_) => {
+                    Ok(chd_path) => {
                         converted.fetch_add(1, Ordering::SeqCst);
+                        let chd_size = std::fs::metadata(&chd_path).map(|m| m.len()).unwrap_or(0);
+                        bytes_before.fetch_add(original_size, Ordering::SeqCst);
+                        bytes_after.fetch_add(chd_size, Ordering::SeqCst);
                         // Only reached once chdman verify passed on the new
                         // .chd, so the originals are safe to let go of.
                         let note = if trash_originals {
@@ -610,6 +623,8 @@ fn start_conversion(
                             path: disc_path_str,
                             message: "convertido y verificado".to_string(),
                             note,
+                            original_bytes: Some(original_size),
+                            chd_bytes: Some(chd_size),
                         }
                     }
                     // A cancellation shows up as the same plain failure a
@@ -631,6 +646,8 @@ fn start_conversion(
                             path: disc_path_str,
                             message: message.to_string(),
                             note: None,
+                            original_bytes: None,
+                            chd_bytes: None,
                         }
                     }
                 };
@@ -649,6 +666,8 @@ fn start_conversion(
             skipped: 0,
             failed: failed.load(Ordering::SeqCst),
             cancelled: cancelled_flag.load(Ordering::SeqCst),
+            original_bytes: bytes_before.load(Ordering::SeqCst),
+            chd_bytes: bytes_after.load(Ordering::SeqCst),
         };
         let _ = append_history(&app_dir, record.clone());
         let _ = window.emit("run-finished", &record);

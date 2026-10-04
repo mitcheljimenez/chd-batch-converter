@@ -15,6 +15,9 @@ const translations = {
     autoUpdateLabel: "Instalar actualizaciones automáticamente",
     parallelConversionLabel: "Convertir varios discos a la vez",
     trashOriginalsLabel: "Mover los archivos originales a la papelera tras convertir y verificar",
+    sizeChange: (before, after, change) => `${before} → ${after} (${change})`,
+    runSavings: (saved, percent) => `Espacio ahorrado: ${saved} (${percent} menos)`,
+    historySaved: (saved) => `ahorró ${saved}`,
     noteORIGINALS_TRASHED: "originales enviados a la papelera",
     noteORIGINALS_TRASH_FAILED: "no se pudieron mover los originales a la papelera (siguen en su sitio)",
     parallelConversionHint:
@@ -142,6 +145,9 @@ const translations = {
     autoUpdateLabel: "Install updates automatically",
     parallelConversionLabel: "Convert several discs at once",
     trashOriginalsLabel: "Move the original files to the trash after converting and verifying",
+    sizeChange: (before, after, change) => `${before} → ${after} (${change})`,
+    runSavings: (saved, percent) => `Space saved: ${saved} (${percent} smaller)`,
+    historySaved: (saved) => `saved ${saved}`,
     noteORIGINALS_TRASHED: "originals moved to the trash",
     noteORIGINALS_TRASH_FAILED: "couldn't move the originals to the trash (they're still in place)",
     parallelConversionHint:
@@ -274,6 +280,33 @@ export function chdmanInstallCommand() {
     default:
       return null;
   }
+}
+
+// Human-readable size in the current language's number format, using
+// 1024-based units like Windows Explorer and most file managers.
+export function formatBytes(bytes) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = Math.abs(bytes);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const number = new Intl.NumberFormat(currentLanguage === "es" ? "es-ES" : "en-US", {
+    maximumFractionDigits: unit >= 3 ? 2 : 1,
+  }).format(value);
+  return `${bytes < 0 ? "-" : ""}${number} ${units[unit]}`;
+}
+
+// Percent change from `before` to `after`, signed ("-36 %" when smaller).
+export function formatPercentChange(before, after) {
+  if (before <= 0) return "";
+  const change = ((after - before) / before) * 100;
+  const number = new Intl.NumberFormat(currentLanguage === "es" ? "es-ES" : "en-US", {
+    maximumFractionDigits: 0,
+    signDisplay: "exceptZero",
+  }).format(change);
+  return `${number} %`;
 }
 
 export function setLanguage(language) {

@@ -65,6 +65,13 @@ pub struct RunRecord {
     pub skipped: u32,
     pub failed: u32,
     pub cancelled: bool,
+    /// Combined size of the originals and of the resulting .chd files, over
+    /// the discs this run converted. 0 for runs recorded before this was
+    /// tracked.
+    #[serde(default)]
+    pub original_bytes: u64,
+    #[serde(default)]
+    pub chd_bytes: u64,
 }
 
 pub fn load_history(app_dir: &Path) -> Vec<RunRecord> {
@@ -136,6 +143,8 @@ mod tests {
             skipped: 1,
             failed: 0,
             cancelled: false,
+            original_bytes: 3_000,
+            chd_bytes: 1_200,
         };
         let r2 = RunRecord {
             timestamp: "2026-09-15T11:00:00".to_string(),
@@ -144,6 +153,8 @@ mod tests {
             skipped: 0,
             failed: 0,
             cancelled: true,
+            original_bytes: 0,
+            chd_bytes: 0,
         };
         append_history(&dir, r1.clone()).unwrap();
         append_history(&dir, r2.clone()).unwrap();
@@ -219,5 +230,18 @@ mod tests {
         };
         save_config(&dir, &config).unwrap();
         assert!(!load_config(&dir).parallel_conversion);
+    }
+
+    #[test]
+    fn history_saved_before_sizes_were_tracked_still_loads() {
+        let dir = temp_dir("old_history");
+        fs::write(
+            dir.join("historial.json"),
+            r#"[{"timestamp":"1","folder":"C:\\Games","converted":2,"skipped":0,"failed":0,"cancelled":false}]"#,
+        )
+        .unwrap();
+        let loaded = load_history(&dir);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!((loaded[0].original_bytes, loaded[0].chd_bytes), (0, 0));
     }
 }
