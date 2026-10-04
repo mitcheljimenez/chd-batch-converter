@@ -164,7 +164,7 @@ Windows build bundles a fallback `chdman.exe` (and the legacy
 `convertir_a_chd.bat`), so it works out of the box.
 
 On Linux, building needs the WebKitGTK toolchain first:
-`sudo apt install libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the bundled
+`sudo apt install libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xdg-utils`. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the bundled
 `chdman.exe`'s license.
 
 ## Develop

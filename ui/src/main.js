@@ -9,7 +9,7 @@ let currentFolder = null;
 let organizeDestination = null;
 let moveChdDestination = null;
 let discs = []; // [{ name, folder, kind, status: "pending"|"ok"|"skip"|"fail", message: "" }]
-let formatOverrides = new Set(); // full paths ("folder\\name") the user forced to CD format
+let formatOverrides = new Set(); // full paths (see joinPath) the user forced to CD format
 
 const pickFolderBtn = document.getElementById("pick-folder-btn");
 const rescanBtn = document.getElementById("rescan-btn");
@@ -161,6 +161,13 @@ let appVersion = null;
 // "windows" | "linux" | "macos", also fetched once at startup.
 let platform = "windows";
 
+// Joins a folder and file name the way the backend's Path::join does, so a
+// path built here compares equal to (and can be handed back as) one built
+// in Rust: "\\" on Windows, "/" on Linux/macOS.
+function joinPath(folder, name) {
+  return `${folder}${platform === "windows" ? "\\" : "/"}${name}`;
+}
+
 function updateVersionLabel() {
   if (appVersion) appVersionLabel.textContent = t("versionLabel", appVersion);
 }
@@ -254,9 +261,9 @@ function renderTable() {
       cdOption.value = "cd";
       cdOption.textContent = t("overrideFormatCd");
       select.append(dvdOption, cdOption);
-      select.value = formatOverrides.has(`${disc.folder}\\${disc.name}`) ? "cd" : "dvd";
+      select.value = formatOverrides.has(joinPath(disc.folder, disc.name)) ? "cd" : "dvd";
       select.addEventListener("change", () => {
-        const fullPath = `${disc.folder}\\${disc.name}`;
+        const fullPath = joinPath(disc.folder, disc.name);
         if (select.value === "cd") {
           formatOverrides.add(fullPath);
         } else {
@@ -287,8 +294,10 @@ function renderTable() {
 // (the total scanned), this drops as each disc finishes so the "N files to
 // convert" label stays accurate mid-run instead of just showing the count
 // from the initial scan forever.
+// Discs still without a .chd: queued ones plus any a cancelled run never
+// finished (its partial .chd is removed, so they still need converting).
 function pendingDiscCount() {
-  return discs.filter((d) => d.status === "pending").length;
+  return discs.filter((d) => d.status === "pending" || d.status === "cancel").length;
 }
 
 function updatePendingLabel() {
@@ -408,7 +417,7 @@ let chdsScannedForFolder = null;
 let currentRunChds = [];
 
 function fullChdPath(chd) {
-  return `${chd.folder}\\${chd.name}`;
+  return joinPath(chd.folder, chd.name);
 }
 
 async function rescanChds() {

@@ -221,6 +221,7 @@ button.secondary { background: var(--surface-hover); }
 #move-chd-no-folder-hint { color: var(--text-dim); font-style: italic; }
 
 #extract-no-folder-hint { color: var(--text-dim); font-style: italic; }
+#chdman-install-hint { color: var(--text-dim); font-size: 12px; margin: 0; user-select: text; }
 
 #extract-progress-track {
   height: 8px;

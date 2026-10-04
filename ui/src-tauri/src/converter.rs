@@ -76,8 +76,18 @@ pub fn convert_disc(
     // only applies to the convert step.
     let convert_args = build_convert_args(kind, force_cd, disc_path, &out);
 
-    run_with_progress(chdman_path, &convert_args, active_pids, &mut on_progress)
-        .map_err(|_| "CONVERT_FAILED".to_string())?;
+    // A failed or cancelled (killed) convert leaves a truncated .chd behind,
+    // which the next scan would mistake for a finished conversion and hide
+    // the disc for good -- so remove it, unless it was already there before
+    // we started (chdman refuses to overwrite an existing output, so in that
+    // case the file isn't ours to delete).
+    let preexisting = out.exists();
+    if run_with_progress(chdman_path, &convert_args, active_pids, &mut on_progress).is_err() {
+        if !preexisting {
+            let _ = std::fs::remove_file(&out);
+        }
+        return Err("CONVERT_FAILED".to_string());
+    }
 
     let verify_args: Vec<std::ffi::OsString> = vec!["verify".into(), "-i".into(), out.as_os_str().to_owned()];
     run_with_progress(chdman_path, &verify_args, active_pids, &mut on_progress)

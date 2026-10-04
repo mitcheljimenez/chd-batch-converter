@@ -791,7 +791,8 @@ while [ $# -gt 0 ]; do
 done
 case "$cmd" in
   createcd|createdvd)
-    if [ -n "$MOCK_CHDMAN_HANG" ]; then exec sleep 30; fi
+    if [ -n "$MOCK_CHDMAN_HANG" ]; then printf 'partial' > "$out"; exec sleep 30; fi
+    if [ -e "$out" ]; then echo "Error: file already exists" >&2; exit 1; fi
     printf 'Compressing, 50.0%% complete... (ratio=40.0%%)\r' >&2
     printf 'Compressing, 100.0%% complete... (ratio=40.0%%)\n' >&2
     printf 'chd' > "$out"
@@ -864,6 +865,24 @@ esac
         let result = worker.join().unwrap();
         assert_eq!(result, Err("CONVERT_FAILED".to_string()));
         assert!(started.elapsed() < Duration::from_secs(20), "kill didn't stop chdman");
+        assert!(
+            !disc.with_extension("chd").exists(),
+            "the truncated .chd from a cancelled run must be removed"
+        );
+        let _ = fs::remove_dir_all(disc.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_convert_keeps_a_chd_that_was_already_there() {
+        let (mock, disc) = setup("chd_ui_unix_preexisting_test");
+        let existing = disc.with_extension("chd");
+        fs::write(&existing, "user's own chd").unwrap();
+        let pids = Arc::new(Mutex::new(Vec::new()));
+
+        let result = converter::convert_disc(&mock, &disc, "cue", false, &pids, |_, _| {});
+
+        assert_eq!(result, Err("CONVERT_FAILED".to_string()));
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "user's own chd");
         let _ = fs::remove_dir_all(disc.parent().unwrap());
     }
 }
