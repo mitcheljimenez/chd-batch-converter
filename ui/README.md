@@ -71,7 +71,9 @@ You only need to do this once; later auto-updates open normally.
    bundled, and on Linux/macOS the one your package manager installed is
    found automatically, so this step is optional unless you want to use
    your own).
-3. Click "Elegir carpeta" and pick your ROMs folder.
+3. Click "Elegir carpeta" and pick your ROMs folder, or just drag the
+   folder (or any file inside it) onto the window. The app remembers it
+   and reopens it next time.
 4. On the "Convertir" section, review the detected games, then click
    "Convertir todo". PS2 `.iso` games default to DVD format with `zlib`
    compression, which plays correctly both on PC (PCSX2) and on Android
@@ -99,7 +101,8 @@ You only need to do this once; later auto-updates open normally.
 5. Watch live progress; use "Cancelar" to stop early if needed. Each
    converted disc shows its size before and after (e.g. `700 MB → 450 MB
    (-36 %)`), and the run ends with the total space saved, which is also
-   kept in "Historial".
+   kept in "Historial". If you're in another app when a conversion or
+   extraction finishes, a system notification tells you how it went.
 6. Check "Historial" any time for past runs.
 7. Need to undo a conversion (e.g. to recover a `.chd` made unreadable on
    Android by an old version of this app)? See [Extraer .chd](#extraer-chd)

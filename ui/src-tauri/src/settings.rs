@@ -28,6 +28,9 @@ pub struct Config {
     /// default: originals are never touched unless the user opts in.
     #[serde(default)]
     pub trash_originals: bool,
+    /// The folder last chosen, reopened on the next launch ("" for none).
+    #[serde(default)]
+    pub last_folder: String,
 }
 
 impl Default for Config {
@@ -38,6 +41,7 @@ impl Default for Config {
             language: default_language(),
             parallel_conversion: true,
             trash_originals: false,
+            last_folder: String::new(),
         }
     }
 }
@@ -119,6 +123,7 @@ mod tests {
             language: "es".to_string(),
             parallel_conversion: true,
             trash_originals: false,
+            last_folder: String::new(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
@@ -181,6 +186,7 @@ mod tests {
             language: "es".to_string(),
             parallel_conversion: true,
             trash_originals: false,
+            last_folder: String::new(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
@@ -205,6 +211,7 @@ mod tests {
             language: "en".to_string(),
             parallel_conversion: true,
             trash_originals: false,
+            last_folder: String::new(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);

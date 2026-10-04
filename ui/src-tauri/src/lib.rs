@@ -302,6 +302,28 @@ fn find_system_chdman(path_var: Option<std::ffi::OsString>) -> Option<std::path:
         .find(|candidate| candidate.is_file())
 }
 
+/// Whether `path` is an existing directory, so the frontend can tell if
+/// the remembered last folder is still there before reopening it.
+#[tauri::command]
+fn folder_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_dir()
+}
+
+/// The folder to open for something dropped on the window: the folder
+/// itself, or the folder containing a dropped file (e.g. a .cue), so either
+/// works. None if the path doesn't exist.
+#[tauri::command]
+fn folder_for_drop(path: String) -> Option<String> {
+    let path = std::path::Path::new(&path);
+    if path.is_dir() {
+        Some(path.to_string_lossy().to_string())
+    } else if path.is_file() {
+        path.parent().map(|p| p.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
+
 /// The OS this build runs on ("windows", "linux", "macos"), so the
 /// frontend can show platform-specific help (e.g. how to install chdman).
 #[tauri::command]
@@ -688,6 +710,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(RunState(
             Arc::new(AtomicBool::new(false)),
@@ -711,7 +734,9 @@ pub fn run() {
             check_for_update,
             install_update,
             restart_app,
-            get_platform
+            get_platform,
+            folder_exists,
+            folder_for_drop
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

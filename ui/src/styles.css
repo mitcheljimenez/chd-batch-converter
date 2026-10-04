@@ -362,3 +362,8 @@ button.secondary { background: var(--surface-hover); }
 
 #trash-originals-row { color: var(--text-dim); font-size: 13px; display: flex; align-items: center; gap: 6px; }
 #savings-label { color: var(--ok); font-size: 13px; margin: 0; }
+
+/* Drop target highlight while a folder is dragged over the window. */
+body.drag-over #app-content { outline: 2px dashed var(--accent); outline-offset: -6px; border-radius: 10px; }
+#pick-folder-btn { flex-shrink: 0; white-space: nowrap; }
+#folder-label { overflow-wrap: anywhere; }

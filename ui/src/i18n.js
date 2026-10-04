@@ -18,6 +18,9 @@ const translations = {
     sizeChange: (before, after, change) => `${before} → ${after} (${change})`,
     runSavings: (saved, percent) => `Espacio ahorrado: ${saved} (${percent} menos)`,
     historySaved: (saved) => `ahorró ${saved}`,
+    notifyConvertDone: "Conversión terminada",
+    notifyExtractDone: "Extracción terminada",
+    notifySummary: (ok, failed) => (failed > 0 ? `${ok} correctos, ${failed} con errores` : `${ok} correctos`),
     noteORIGINALS_TRASHED: "originales enviados a la papelera",
     noteORIGINALS_TRASH_FAILED: "no se pudieron mover los originales a la papelera (siguen en su sitio)",
     parallelConversionHint:
@@ -148,6 +151,9 @@ const translations = {
     sizeChange: (before, after, change) => `${before} → ${after} (${change})`,
     runSavings: (saved, percent) => `Space saved: ${saved} (${percent} smaller)`,
     historySaved: (saved) => `saved ${saved}`,
+    notifyConvertDone: "Conversion finished",
+    notifyExtractDone: "Extraction finished",
+    notifySummary: (ok, failed) => (failed > 0 ? `${ok} succeeded, ${failed} failed` : `${ok} succeeded`),
     noteORIGINALS_TRASHED: "originals moved to the trash",
     noteORIGINALS_TRASH_FAILED: "couldn't move the originals to the trash (they're still in place)",
     parallelConversionHint:

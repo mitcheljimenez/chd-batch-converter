@@ -619,27 +619,55 @@ listen("extract-item-done", (event) => {
   }
 });
 
-listen("extract-all-finished", () => {
+listen("extract-all-finished", (event) => {
+  const { done = 0, failed = 0 } = event?.payload ?? {};
+  notifyIfAway(t("notifyExtractDone"), t("notifySummary", done, failed));
   extractRunning = false;
   currentRunChds = [];
   extractProgressTrack.style.display = "none";
   updateExtractAllAvailability();
 });
 
-pickFolderBtn.addEventListener("click", async () => {
-  const selected = await open({ directory: true, multiple: false });
-  if (!selected) return;
-
-  currentFolder = selected;
-  folderLabel.textContent = selected;
+// Makes `folder` the working folder and scans it. Shared by the picker,
+// restoring the last folder at startup, and dropping a folder on the window.
+async function selectFolder(folder) {
+  currentFolder = folder;
+  folderLabel.textContent = folder;
   updateOrganizeAvailability();
   updateMoveChdAvailability();
   updateFlattenAvailability();
   rescanBtn.disabled = false;
   convertOpenFolderBtn.disabled = false;
+  // Remembered so the next launch opens straight into it.
+  saveConfig();
 
-  await rescan(selected);
+  await rescan(folder);
   await rescanChds();
+}
+
+// Dropping a folder (or any file inside one) on the window opens it, the
+// same as picking it. Ignored while converting or extracting, so a stray
+// drop can't switch folders out from under a running batch.
+function isBusy() {
+  return cancelBtn.style.display !== "none" || extractRunning;
+}
+
+window.__TAURI__.webview.getCurrentWebview().onDragDropEvent(async (event) => {
+  const { type, paths } = event.payload;
+  if (type === "enter" || type === "over") {
+    document.body.classList.toggle("drag-over", !isBusy());
+    return;
+  }
+  document.body.classList.remove("drag-over");
+  if (type !== "drop" || isBusy() || !paths?.length) return;
+  const folder = await invoke("folder_for_drop", { path: paths[0] });
+  if (folder) await selectFolder(folder);
+});
+
+pickFolderBtn.addEventListener("click", async () => {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected) return;
+  await selectFolder(selected);
 });
 
 rescanBtn.addEventListener("click", async () => {
@@ -795,6 +823,13 @@ listen("disc-updated", (event) => {
 listen("run-finished", (event) => {
   invalidateChdScan();
   showRunSavings(event?.payload);
+  const record = event?.payload;
+  // A cancelled run was ended by the user, who's clearly at the app.
+  if (record && !record.cancelled) {
+    const summary = t("notifySummary", record.converted, record.failed);
+    const saved = savedText(record);
+    notifyIfAway(t("notifyConvertDone"), summary + saved);
+  }
   // A cancelled run leaves discs that were never reached stuck on the pending
   // "•" forever, which reads as "still working". Mark them as cancelled.
   if (event?.payload?.cancelled) {
@@ -828,6 +863,7 @@ async function saveConfig() {
       language: languageSelect.value,
       parallel_conversion: parallelConversionCheckbox.checked,
       trash_originals: trashOriginalsCheckbox.checked,
+      last_folder: currentFolder ?? "",
     },
   });
 }
@@ -857,12 +893,37 @@ languageSelect.addEventListener("change", async () => {
   await saveConfig();
 });
 
+// A desktop notification for a long batch finishing while the user is in
+// another app. Skipped when the window has focus: they can already see the
+// result, and a notification on top of it would just be noise. Permission
+// is asked the first time one is actually needed (macOS requires it).
+async function notifyIfAway(title, body) {
+  if (document.hasFocus()) return;
+  const notification = window.__TAURI__.notification;
+  if (!notification) return;
+  try {
+    let granted = await notification.isPermissionGranted();
+    if (!granted) granted = (await notification.requestPermission()) === "granted";
+    if (granted) notification.sendNotification({ title, body });
+  } catch {
+    // Notifications are a nicety; never let one break the UI.
+  }
+}
+
+// " · ahorró X" for a run record, or "" when it saved nothing.
+function savedText(record) {
+  const saved = (record.original_bytes ?? 0) - (record.chd_bytes ?? 0);
+  return record.original_bytes > 0 && saved > 0 ? ` · ${t("historySaved", formatBytes(saved))}` : "";
+}
+
 // Total space freed by the run that just finished (over the discs it
 // converted). Hidden when nothing was converted.
 function showRunSavings(record) {
   const before = record?.original_bytes ?? 0;
   const after = record?.chd_bytes ?? 0;
-  if (before <= 0) {
+  // Nothing converted, or (only with data that doesn't compress) the .chd
+  // files came out no smaller -- there's no saving to announce.
+  if (before <= 0 || after >= before) {
     savingsLabel.style.display = "none";
     return;
   }
@@ -882,7 +943,7 @@ async function renderHistory() {
     const status = run.cancelled
       ? t("cancelled")
       : t("historySummary", { converted: run.converted, skipped: run.skipped, failed: run.failed }) +
-        (run.original_bytes > 0 ? ` · ${t("historySaved", formatBytes(run.original_bytes - run.chd_bytes))}` : "");
+        savedText(run);
     const row = document.createElement("div");
     row.className = "history-row";
     row.append(mk("history-folder", run.folder), mk("", date), mk("", status));
@@ -1016,4 +1077,9 @@ checkUpdatesBtn.addEventListener("click", async () => {
   chdmanPathInput.value = config.chdman_path;
   updateOrganizeAvailability();
   updateMoveChdAvailability();
+  // Reopen the folder from last time, unless it's gone (unplugged drive,
+  // renamed, deleted) -- then just start empty, as on a first launch.
+  if (config.last_folder && (await invoke("folder_exists", { path: config.last_folder }))) {
+    await selectFolder(config.last_folder);
+  }
 })();
