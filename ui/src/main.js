@@ -71,6 +71,9 @@ const extractProgressFill = document.getElementById("extract-progress-fill");
 const extractTable = document.getElementById("extract-table");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
+const parallelConversionCheckbox = document.getElementById("parallel-conversion-checkbox");
+const parallelConversionLabelText = document.getElementById("parallel-conversion-label-text");
+const parallelConversionHint = document.getElementById("parallel-conversion-hint");
 const languageLabelText = document.getElementById("language-label-text");
 const languageSelect = document.getElementById("language-select");
 const checkUpdatesBtn = document.getElementById("check-updates-btn");
@@ -119,6 +122,7 @@ async function showView(name) {
     const config = await invoke("get_config");
     chdmanPathInput.value = config.chdman_path;
     autoUpdateCheckbox.checked = config.auto_update_enabled;
+    parallelConversionCheckbox.checked = config.parallel_conversion;
     languageSelect.value = config.language;
   } else if (name === "history") {
     await renderHistory();
@@ -189,6 +193,8 @@ function applyTranslations() {
   chdmanInstallHint.style.display = installCommand ? "" : "none";
   if (installCommand) chdmanInstallHint.textContent = t("chdmanInstallHint", installCommand);
   autoUpdateLabelText.textContent = t("autoUpdateLabel");
+  parallelConversionLabelText.textContent = t("parallelConversionLabel");
+  parallelConversionHint.textContent = t("parallelConversionHint");
   languageLabelText.textContent = t("languageLabel");
   saveSettingsBtn.textContent = t("save");
   checkUpdatesBtn.textContent = t("checkUpdates");
@@ -769,25 +775,28 @@ listen("run-finished", (event) => {
   progressTrack.style.display = "none";
 });
 
-saveSettingsBtn.addEventListener("click", async () => {
+// Persists every Settings field at once (set_config replaces the whole
+// config), so each control that saves itself can't drop another's value.
+async function saveConfig() {
   await invoke("set_config", {
     chdmanPath: chdmanPathInput.value,
     autoUpdateEnabled: autoUpdateCheckbox.checked,
     language: languageSelect.value,
+    parallelConversion: parallelConversionCheckbox.checked,
   });
-});
+}
+
+saveSettingsBtn.addEventListener("click", saveConfig);
 
 // Saved on its own, independent of the Guardar button: a checkbox toggle
 // that silently required a separate "Guardar" click to take effect was
 // confusing (it looked applied immediately since the checkbox visually
 // stayed checked, but the persisted config still held the old value).
-autoUpdateCheckbox.addEventListener("change", async () => {
-  await invoke("set_config", {
-    chdmanPath: chdmanPathInput.value,
-    autoUpdateEnabled: autoUpdateCheckbox.checked,
-    language: languageSelect.value,
-  });
-});
+autoUpdateCheckbox.addEventListener("change", saveConfig);
+
+// Same immediate-save treatment; read by the backend at the start of each
+// conversion run, so it applies from the next "Convertir todo" on.
+parallelConversionCheckbox.addEventListener("change", saveConfig);
 
 // Also saved immediately, and re-renders every static label right away —
 // leaving stale text until the next Guardar click would be as confusing as
@@ -795,11 +804,7 @@ autoUpdateCheckbox.addEventListener("change", async () => {
 languageSelect.addEventListener("change", async () => {
   setLanguage(languageSelect.value);
   applyTranslations();
-  await invoke("set_config", {
-    chdmanPath: chdmanPathInput.value,
-    autoUpdateEnabled: autoUpdateCheckbox.checked,
-    language: languageSelect.value,
-  });
+  await saveConfig();
 });
 
 async function renderHistory() {
@@ -938,6 +943,7 @@ checkUpdatesBtn.addEventListener("click", async () => {
   applyTranslations();
   languageSelect.value = config.language;
   autoUpdateCheckbox.checked = config.auto_update_enabled;
+  parallelConversionCheckbox.checked = config.parallel_conversion;
   chdmanPathInput.value = config.chdman_path;
   updateOrganizeAvailability();
   updateMoveChdAvailability();

@@ -13,6 +13,9 @@ const translations = {
     chdmanInstallHint: (command) =>
       `Déjalo vacío para usar el chdman instalado en el sistema. Si no lo tienes: ${command}`,
     autoUpdateLabel: "Instalar actualizaciones automáticamente",
+    parallelConversionLabel: "Convertir varios discos a la vez",
+    parallelConversionHint:
+      "Activado: un disco por núcleo del procesador, más rápido con muchos juegos. Desactivado: un disco a la vez usando todos los núcleos; deja el PC más libre mientras convierte y avanza en orden.",
     languageLabel: "Idioma",
     save: "Guardar",
     checkUpdates: "Buscar actualizaciones",
@@ -133,6 +136,9 @@ const translations = {
     chdmanInstallHint: (command) =>
       `Leave empty to use the chdman installed on your system. If you don't have it: ${command}`,
     autoUpdateLabel: "Install updates automatically",
+    parallelConversionLabel: "Convert several discs at once",
+    parallelConversionHint:
+      "On: one disc per CPU core, faster for large libraries. Off: one disc at a time using every core; keeps the PC more responsive while converting and goes in order.",
     languageLabel: "Language",
     save: "Save",
     checkUpdates: "Check for updates",

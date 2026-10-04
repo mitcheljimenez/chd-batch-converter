@@ -322,6 +322,7 @@ fn set_config(
     chdman_path: String,
     auto_update_enabled: bool,
     language: String,
+    parallel_conversion: bool,
 ) -> Result<(), String> {
     let app_dir = resolve_app_config_dir(&app_handle)?;
     save_config(
@@ -330,6 +331,7 @@ fn set_config(
             chdman_path,
             auto_update_enabled,
             language,
+            parallel_conversion,
         },
     )
     .map_err(|e| e.to_string())
@@ -470,7 +472,8 @@ fn restart_app(app_handle: tauri::AppHandle) {
 }
 
 /// Converts every eligible disc under `root` in parallel, one `chdman`
-/// process per available CPU core (see `converter::worker_count`) --
+/// process per available CPU core (see `converter::worker_count`), or one
+/// disc at a time when `Config.parallel_conversion` is off --
 /// replacing the old approach of shelling out to `convertir_a_chd.bat`,
 /// which only ever ran one `chdman` at a time. `format_overrides` is the
 /// full path (as reported by `prescan`, `folder + separator + name`) of
@@ -527,7 +530,8 @@ fn start_conversion(
 
     let discs = scan_folder(std::path::Path::new(&root));
     let overrides: std::collections::HashSet<String> = format_overrides.into_iter().collect();
-    let worker_total = converter::worker_count(discs.len());
+    let parallel = config.parallel_conversion;
+    let worker_total = if parallel { converter::worker_count(discs.len()) } else { 1 };
     let queue = Arc::new(Mutex::new(std::collections::VecDeque::from(discs)));
 
     let converted = Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -569,6 +573,7 @@ fn start_conversion(
                     &disc_path,
                     &disc.kind,
                     force_cd,
+                    parallel,
                     &active_pids,
                     |phase, percent| {
                         let _ = progress_window.emit(
@@ -822,7 +827,7 @@ esac
         let pids = Arc::new(Mutex::new(Vec::new()));
         let mut seen = Vec::new();
 
-        let out = converter::convert_disc(&mock, &disc, "cue", false, &pids, |phase, pct| {
+        let out = converter::convert_disc(&mock, &disc, "cue", false, true, &pids, |phase, pct| {
             seen.push((phase.to_string(), pct))
         })
         .expect("conversion should succeed");
@@ -850,7 +855,7 @@ esac
         let worker_disc = disc.clone();
         let started = Instant::now();
         let worker = thread::spawn(move || {
-            converter::convert_disc(Path::new(&hanging), &worker_disc, "cue", false, &worker_pids, |_, _| {})
+            converter::convert_disc(Path::new(&hanging), &worker_disc, "cue", false, true, &worker_pids, |_, _| {})
         });
 
         let pid = loop {
@@ -879,7 +884,7 @@ esac
         fs::write(&existing, "user's own chd").unwrap();
         let pids = Arc::new(Mutex::new(Vec::new()));
 
-        let result = converter::convert_disc(&mock, &disc, "cue", false, &pids, |_, _| {});
+        let result = converter::convert_disc(&mock, &disc, "cue", false, true, &pids, |_, _| {});
 
         assert_eq!(result, Err("CONVERT_FAILED".to_string()));
         assert_eq!(fs::read_to_string(&existing).unwrap(), "user's own chd");
