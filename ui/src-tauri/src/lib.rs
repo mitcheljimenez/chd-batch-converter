@@ -1,5 +1,6 @@
 mod chd_mover;
 mod converter;
+mod disc_files;
 mod extractor;
 mod flattener;
 pub mod log_tail;
@@ -316,25 +317,13 @@ fn get_config(app_handle: tauri::AppHandle) -> Config {
     }
 }
 
+/// Replaces the whole persisted config. The frontend always sends every
+/// field (see `saveConfig` in main.js), so one call shape covers every
+/// setting instead of growing a parameter per option.
 #[tauri::command]
-fn set_config(
-    app_handle: tauri::AppHandle,
-    chdman_path: String,
-    auto_update_enabled: bool,
-    language: String,
-    parallel_conversion: bool,
-) -> Result<(), String> {
+fn set_config(app_handle: tauri::AppHandle, config: Config) -> Result<(), String> {
     let app_dir = resolve_app_config_dir(&app_handle)?;
-    save_config(
-        &app_dir,
-        &Config {
-            chdman_path,
-            auto_update_enabled,
-            language,
-            parallel_conversion,
-        },
-    )
-    .map_err(|e| e.to_string())
+    save_config(&app_dir, &config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -471,6 +460,18 @@ fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
 }
 
+/// Payload of `disc-updated`: the same fields the old `.bat`-tailing
+/// `LogEvent` carried, plus `note`, a stable code (translated by the
+/// frontend) for anything extra that happened to the disc, e.g.
+/// "ORIGINALS_TRASHED".
+#[derive(serde::Serialize, Clone)]
+struct DiscResult {
+    status: log_tail::DiscStatus,
+    path: String,
+    message: String,
+    note: Option<&'static str>,
+}
+
 /// Converts every eligible disc under `root` in parallel, one `chdman`
 /// process per available CPU core (see `converter::worker_count`), or one
 /// disc at a time when `Config.parallel_conversion` is off --
@@ -495,6 +496,7 @@ fn start_conversion(
     app_handle: tauri::AppHandle,
     root: String,
     format_overrides: Vec<String>,
+    trash_originals: bool,
     state: tauri::State<RunState>,
 ) -> Result<(), String> {
     // swap(true) both checks and claims the "a run is in flight" slot
@@ -565,6 +567,9 @@ fn start_conversion(
                 let disc_path = std::path::Path::new(&disc.folder).join(&disc.name);
                 let disc_path_str = disc_path.to_string_lossy().to_string();
                 let force_cd = disc.kind == "iso" && overrides.contains(&disc_path_str);
+                // Listed before converting: the set of files is what the
+                // .cue/.gdi references right now, not after the fact.
+                let original_files = disc_files::disc_files(&disc_path, &disc.kind);
                 let progress_window = window.clone();
                 let progress_path = disc_path_str.clone();
 
@@ -590,10 +595,21 @@ fn start_conversion(
                 let event = match result {
                     Ok(_) => {
                         converted.fetch_add(1, Ordering::SeqCst);
-                        log_tail::LogEvent {
+                        // Only reached once chdman verify passed on the new
+                        // .chd, so the originals are safe to let go of.
+                        let note = if trash_originals {
+                            match disc_files::move_to_trash(&original_files) {
+                                Ok(()) => Some("ORIGINALS_TRASHED"),
+                                Err(_) => Some("ORIGINALS_TRASH_FAILED"),
+                            }
+                        } else {
+                            None
+                        };
+                        DiscResult {
                             status: log_tail::DiscStatus::Ok,
                             path: disc_path_str,
                             message: "convertido y verificado".to_string(),
+                            note,
                         }
                     }
                     // A cancellation shows up as the same plain failure a
@@ -610,10 +626,11 @@ fn start_conversion(
                         } else {
                             "fallo la conversion"
                         };
-                        log_tail::LogEvent {
+                        DiscResult {
                             status: log_tail::DiscStatus::Fail,
                             path: disc_path_str,
                             message: message.to_string(),
+                            note: None,
                         }
                     }
                 };

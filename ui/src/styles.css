@@ -359,3 +359,5 @@ button.secondary { background: var(--surface-hover); }
   font-size: 11px;
   cursor: help;
 }
+
+#trash-originals-row { color: var(--text-dim); font-size: 13px; display: flex; align-items: center; gap: 6px; }

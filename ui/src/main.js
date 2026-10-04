@@ -72,6 +72,8 @@ const extractTable = document.getElementById("extract-table");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
 const parallelConversionCheckbox = document.getElementById("parallel-conversion-checkbox");
+const trashOriginalsCheckbox = document.getElementById("trash-originals-checkbox");
+const trashOriginalsLabelText = document.getElementById("trash-originals-label-text");
 const parallelConversionLabelText = document.getElementById("parallel-conversion-label-text");
 const parallelConversionHint = document.getElementById("parallel-conversion-hint");
 const languageLabelText = document.getElementById("language-label-text");
@@ -139,7 +141,7 @@ async function showView(name) {
     // replace them with a fresh "pending" scan, discarding real state for
     // no reason.
     extractNoFolderHint.style.display = currentFolder ? "none" : "block";
-    if (currentFolder && chdsScannedForFolder !== currentFolder) {
+    if (currentFolder && chdsScannedForFolder !== currentFolder && !extractRunning) {
       await rescanChds();
     } else {
       renderExtractTable();
@@ -195,6 +197,7 @@ function applyTranslations() {
   autoUpdateLabelText.textContent = t("autoUpdateLabel");
   parallelConversionLabelText.textContent = t("parallelConversionLabel");
   parallelConversionHint.textContent = t("parallelConversionHint");
+  trashOriginalsLabelText.textContent = t("trashOriginalsLabel");
   languageLabelText.textContent = t("languageLabel");
   saveSettingsBtn.textContent = t("save");
   checkUpdatesBtn.textContent = t("checkUpdates");
@@ -374,6 +377,7 @@ runMoveChdBtn.addEventListener("click", async () => {
   if (!currentFolder || !moveChdDestination) return;
   try {
     const summary = await invoke("move_chd_files", { root: currentFolder, destination: moveChdDestination });
+    invalidateChdScan();
     alert(t("moveChdSummary", summary));
     moveChdOpenDestBtn.style.display = summary.files_moved > 0 ? "inline-block" : "none";
   } catch (err) {
@@ -394,6 +398,7 @@ runFlattenBtn.addEventListener("click", async () => {
   if (!currentFolder) return;
   try {
     const summary = await invoke("flatten_folders", { root: currentFolder });
+    invalidateChdScan();
     alert(t("flattenSummary", summary));
   } catch (err) {
     alert(t("flattenFailed", translateError(err)));
@@ -416,6 +421,13 @@ let extractRunning = false;
 // genuinely new folder (needs a fresh scan) apart from just re-opening the
 // tab on the same one (must NOT wipe existing rows/results).
 let chdsScannedForFolder = null;
+
+// Converting, moving, flattening or organizing changes which .chd files
+// exist, so the Extract tab's list must be rebuilt on its next visit
+// instead of showing the pre-change scan.
+function invalidateChdScan() {
+  chdsScannedForFolder = null;
+}
 // The items the in-flight run() was started with -- NOT always all of
 // `chds` (a single row's "Extraer" button runs just that one item). The
 // overall progress bar must be computed against this subset, not the full
@@ -655,6 +667,7 @@ runOrganizeBtn.addEventListener("click", async () => {
   }
 
   try {
+    invalidateChdScan();
     const summary = await invoke("organize_multidisc", {
       root: currentFolder,
       destination: organizeDestination,
@@ -684,18 +697,28 @@ convertBtn.addEventListener("click", async () => {
   // feedback until the backend confirms — this gives instant feedback and
   // real per-file progress fills the bar in as chdman reports it.
   convertBtn.disabled = true;
+  // The backend reads this once when the run starts; locking it makes clear
+  // a mid-run change wouldn't apply until the next run.
+  trashOriginalsCheckbox.disabled = true;
   convertBtn.style.display = "none";
   cancelBtn.style.display = "inline-block";
   rescanBtn.disabled = true;
   progressTrack.style.display = "block";
   progressFill.style.width = "0%";
   try {
-    await invoke("start_conversion", { root: currentFolder, formatOverrides: Array.from(formatOverrides) });
+    await invoke("start_conversion", {
+      root: currentFolder,
+      formatOverrides: Array.from(formatOverrides),
+      // Passed explicitly (not read from the saved config) so a click right
+      // after toggling can't race the checkbox's own save.
+      trashOriginals: trashOriginalsCheckbox.checked,
+    });
   } catch (err) {
     // A real failure (bad chdman path, spawn error) must not leave the UI
     // stuck in "converting" state forever — revert so the user can fix the
     // setting and retry.
     convertBtn.disabled = false;
+    trashOriginalsCheckbox.disabled = false;
     convertBtn.style.display = "inline-block";
     cancelBtn.style.display = "none";
     rescanBtn.disabled = false;
@@ -741,11 +764,11 @@ listen("disc-progress", (event) => {
 });
 
 listen("disc-updated", (event) => {
-  const { status, path, message } = event.payload;
+  const { status, path, message, note } = event.payload;
   const disc = matchDiscByPath(path);
   if (disc) {
     disc.status = status.toLowerCase(); // Rust enum serializes as "Ok" | "Skip" | "Fail"
-    disc.message = message;
+    disc.message = note ? `${message} · ${t(`note${note}`)}` : message;
     renderTable();
     updateProgress();
     updatePendingLabel();
@@ -753,6 +776,7 @@ listen("disc-updated", (event) => {
 });
 
 listen("run-finished", (event) => {
+  invalidateChdScan();
   // A cancelled run leaves discs that were never reached stuck on the pending
   // "•" forever, which reads as "still working". Mark them as cancelled.
   if (event?.payload?.cancelled) {
@@ -766,6 +790,7 @@ listen("run-finished", (event) => {
   convertBtn.style.display = "inline-block";
   // Re-enable: the click handler disabled it synchronously at run start.
   convertBtn.disabled = discs.length === 0;
+  trashOriginalsCheckbox.disabled = false;
   cancelBtn.style.display = "none";
   rescanBtn.disabled = false;
   // The fill has a permanent shimmer animation while it's visible (it reads
@@ -779,10 +804,13 @@ listen("run-finished", (event) => {
 // config), so each control that saves itself can't drop another's value.
 async function saveConfig() {
   await invoke("set_config", {
-    chdmanPath: chdmanPathInput.value,
-    autoUpdateEnabled: autoUpdateCheckbox.checked,
-    language: languageSelect.value,
-    parallelConversion: parallelConversionCheckbox.checked,
+    config: {
+      chdman_path: chdmanPathInput.value,
+      auto_update_enabled: autoUpdateCheckbox.checked,
+      language: languageSelect.value,
+      parallel_conversion: parallelConversionCheckbox.checked,
+      trash_originals: trashOriginalsCheckbox.checked,
+    },
   });
 }
 
@@ -797,6 +825,10 @@ autoUpdateCheckbox.addEventListener("change", saveConfig);
 // Same immediate-save treatment; read by the backend at the start of each
 // conversion run, so it applies from the next "Convertir todo" on.
 parallelConversionCheckbox.addEventListener("change", saveConfig);
+
+// Lives on the Convertir view (next to the action it affects) rather than
+// in Settings, but persists the same way.
+trashOriginalsCheckbox.addEventListener("change", saveConfig);
 
 // Also saved immediately, and re-renders every static label right away —
 // leaving stale text until the next Guardar click would be as confusing as
@@ -944,6 +976,7 @@ checkUpdatesBtn.addEventListener("click", async () => {
   languageSelect.value = config.language;
   autoUpdateCheckbox.checked = config.auto_update_enabled;
   parallelConversionCheckbox.checked = config.parallel_conversion;
+  trashOriginalsCheckbox.checked = config.trash_originals;
   chdmanPathInput.value = config.chdman_path;
   updateOrganizeAvailability();
   updateMoveChdAvailability();

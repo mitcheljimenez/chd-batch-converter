@@ -89,6 +89,13 @@ You only need to do this once; later auto-updates open normally.
    disc at a time (in order, with the PC more responsive meanwhile)?
    Uncheck "Convertir varios discos a la vez" in Settings; that single
    `chdman` then uses every core on its own.
+   Want the space back? Check "Mover los archivos originales a la
+   papelera tras convertir y verificar" (right under the buttons): once a
+   disc converts **and** `chdman verify` passes on its new `.chd`, its
+   originals (the `.cue` and every track it lists, the `.gdi` and its
+   tracks, or the `.iso`) go to the system trash / Recycle Bin, never
+   deleted outright, so you can still restore them. Off by default, and a
+   disc that fails or is cancelled always keeps its originals.
 5. Watch live progress; use "Cancelar" to stop early if needed.
 6. Check "Historial" any time for past runs.
 7. Need to undo a conversion (e.g. to recover a `.chd` made unreadable on

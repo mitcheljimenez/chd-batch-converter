@@ -14,6 +14,9 @@ const translations = {
       `Déjalo vacío para usar el chdman instalado en el sistema. Si no lo tienes: ${command}`,
     autoUpdateLabel: "Instalar actualizaciones automáticamente",
     parallelConversionLabel: "Convertir varios discos a la vez",
+    trashOriginalsLabel: "Mover los archivos originales a la papelera tras convertir y verificar",
+    noteORIGINALS_TRASHED: "originales enviados a la papelera",
+    noteORIGINALS_TRASH_FAILED: "no se pudieron mover los originales a la papelera (siguen en su sitio)",
     parallelConversionHint:
       "Activado: un disco por núcleo del procesador, más rápido con muchos juegos. Desactivado: un disco a la vez usando todos los núcleos; deja el PC más libre mientras convierte y avanza en orden.",
     languageLabel: "Idioma",
@@ -79,7 +82,7 @@ const translations = {
     flattenFailed: (err) => `No se pudo aplanar: ${err}`,
     navExtract: "Extraer .chd",
     extractExplanation:
-      "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.",
+      "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso, .bin/.cue o .gdi (Dreamcast), detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.",
     extractNoFolderHint: "Elige una carpeta primero.",
     extractNoFilesFound: "No se encontraron archivos .chd en esta carpeta.",
     extractAllBtn: "Extraer todos",
@@ -138,6 +141,9 @@ const translations = {
       `Leave empty to use the chdman installed on your system. If you don't have it: ${command}`,
     autoUpdateLabel: "Install updates automatically",
     parallelConversionLabel: "Convert several discs at once",
+    trashOriginalsLabel: "Move the original files to the trash after converting and verifying",
+    noteORIGINALS_TRASHED: "originals moved to the trash",
+    noteORIGINALS_TRASH_FAILED: "couldn't move the originals to the trash (they're still in place)",
     parallelConversionHint:
       "On: one disc per CPU core, faster for large libraries. Off: one disc at a time using every core; keeps the PC more responsive while converting and goes in order.",
     languageLabel: "Language",
@@ -203,7 +209,7 @@ const translations = {
     flattenFailed: (err) => `Could not flatten: ${err}`,
     navExtract: "Extract .chd",
     extractExplanation:
-      "This looks for .chd files in the chosen folder and lets you extract them back to .iso or .bin/.cue, auto-detecting the format and verifying the original .chd after each extraction. The original .chd is never touched or deleted.",
+      "This looks for .chd files in the chosen folder and lets you extract them back to .iso, .bin/.cue or .gdi (Dreamcast), auto-detecting the format and verifying the original .chd after each extraction. The original .chd is never touched or deleted.",
     extractNoFolderHint: "Choose a folder first.",
     extractNoFilesFound: "No .chd files found in this folder.",
     extractAllBtn: "Extract all",

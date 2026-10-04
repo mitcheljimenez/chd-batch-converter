@@ -48,6 +48,10 @@
               <button id="convert-open-folder-btn" class="secondary" disabled>Abrir carpeta</button>
               <button id="cancel-btn" class="secondary" style="display:none">Cancelar</button>
             </div>
+            <label id="trash-originals-row">
+              <input id="trash-originals-checkbox" type="checkbox" />
+              <span id="trash-originals-label-text">Mover los archivos originales a la papelera tras convertir y verificar</span>
+            </label>
             <div id="progress-bar-track" style="display:none"><div id="progress-bar-fill"></div></div>
             <p id="discs-pending-label"></p>
             <div id="disc-table"></div>
@@ -96,7 +100,7 @@
           </section>
 
           <section id="extract-view" class="view panel-view" style="display:none">
-            <p id="extract-explanation">Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.</p>
+            <p id="extract-explanation">Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso, .bin/.cue o .gdi (Dreamcast), detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.</p>
             <p id="extract-no-folder-hint">Elige una carpeta primero.</p>
             <div class="toolbar">
               <button id="extract-all-btn" disabled>Extraer todos</button>

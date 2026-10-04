@@ -26,7 +26,8 @@ generated file.
   can be re-run without repeating work).
 - Every generated `.chd` is verified with `chdman verify`.
 - Original files (`.bin`/`.cue`/`.iso`) are never modified, moved, or
-  deleted.
+  deleted. (The desktop app can optionally send them to the trash once
+  their `.chd` is verified.)
 
 ## Desktop app
 

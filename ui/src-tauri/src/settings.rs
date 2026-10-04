@@ -23,6 +23,11 @@ pub struct Config {
     /// existed keep the parallel behavior they already had.
     #[serde(default = "default_true")]
     pub parallel_conversion: bool,
+    /// After a disc converts and verifies, send its original files (the
+    /// .cue/.gdi and its tracks, or the .iso) to the system trash. Off by
+    /// default: originals are never touched unless the user opts in.
+    #[serde(default)]
+    pub trash_originals: bool,
 }
 
 impl Default for Config {
@@ -32,6 +37,7 @@ impl Default for Config {
             auto_update_enabled: false,
             language: default_language(),
             parallel_conversion: true,
+            trash_originals: false,
         }
     }
 }
@@ -105,6 +111,7 @@ mod tests {
             auto_update_enabled: false,
             language: "es".to_string(),
             parallel_conversion: true,
+            trash_originals: false,
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
@@ -162,6 +169,7 @@ mod tests {
             auto_update_enabled: true,
             language: "es".to_string(),
             parallel_conversion: true,
+            trash_originals: false,
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
@@ -185,6 +193,7 @@ mod tests {
             auto_update_enabled: false,
             language: "en".to_string(),
             parallel_conversion: true,
+            trash_originals: false,
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
