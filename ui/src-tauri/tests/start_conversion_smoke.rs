@@ -1,3 +1,6 @@
+// Exercises the legacy convertir_a_chd.bat, so it only runs on Windows.
+#![cfg(windows)]
+
 // This is a smoke test of the *process-spawning + tailing* pattern used by
 // start_conversion, exercised directly against the mock chdman rather than
 // through Tauri's IPC layer (which needs a running window to invoke).

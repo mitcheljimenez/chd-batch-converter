@@ -1,5 +1,4 @@
 use std::io::Read;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -58,7 +57,7 @@ fn build_convert_args(kind: &str, force_cd: bool, disc_path: &Path, out: &Path) 
 ///
 /// `active_pids` records the spawned chdman PID for the run's duration, so
 /// `cancel_conversion` (running on a different thread, possibly mid-queue
-/// for other workers) can `taskkill` it immediately regardless of how much
+/// for other workers) can kill it immediately regardless of how much
 /// stdout is still to drain. A kill shows up here as a plain non-zero exit,
 /// which this function reports as `CONVERT_FAILED`/`CONVERT_VERIFY_FAILED`
 /// -- the caller distinguishes a genuine failure from a cancellation by
@@ -99,19 +98,17 @@ pub fn convert_disc(
 /// drains on the caller's thread, since `on_progress` closes over a
 /// `tauri::Window` and isn't required to be `Send`.
 ///
-/// Registers the spawned PID in `active_pids` for the run's duration so an
-/// external `taskkill` can reach it.
+/// Registers the spawned PID in `active_pids` for the run's duration so
+/// `cancel_conversion` can reach it.
 fn run_with_progress(
     chdman_path: &Path,
     args: &[std::ffi::OsString],
     active_pids: &Arc<Mutex<Vec<u32>>>,
     on_progress: &mut impl FnMut(&str, f32),
 ) -> Result<(), ()> {
-    let mut child = Command::new(chdman_path)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(crate::CREATE_NO_WINDOW)
+    let mut command = Command::new(chdman_path);
+    command.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = crate::hide_console(&mut command)
         .spawn()
         .map_err(|_| ())?;
 

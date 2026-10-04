@@ -1,4 +1,4 @@
-import { t, setLanguage, translateError } from "./i18n.js";
+import { t, setLanguage, setPlatform, chdmanInstallCommand, translateError } from "./i18n.js";
 
 const { invoke } = window.__TAURI__.core;
 const { open } = window.__TAURI__.dialog;
@@ -37,6 +37,7 @@ const settingsView = document.getElementById("settings-view");
 
 const chdmanPathLabel = document.getElementById("chdman-path-label");
 const chdmanPathInput = document.getElementById("chdman-path-input");
+const chdmanInstallHint = document.getElementById("chdman-install-hint");
 const saveSettingsBtn = document.getElementById("save-settings-btn");
 const historyPanel = document.getElementById("history-panel");
 const organizeExplanation = document.getElementById("organize-explanation");
@@ -157,6 +158,8 @@ navSettings.addEventListener("click", () => showView("settings"));
 // applyTranslations() can re-render the label's text in the new language
 // without re-invoking the backend every time.
 let appVersion = null;
+// "windows" | "linux" | "macos", also fetched once at startup.
+let platform = "windows";
 
 function updateVersionLabel() {
   if (appVersion) appVersionLabel.textContent = t("versionLabel", appVersion);
@@ -175,6 +178,9 @@ function applyTranslations() {
   navHistory.textContent = t("history");
   navSettings.textContent = t("settings");
   chdmanPathLabel.textContent = t("chdmanPathLabel");
+  const installCommand = chdmanInstallCommand();
+  chdmanInstallHint.style.display = installCommand ? "" : "none";
+  if (installCommand) chdmanInstallHint.textContent = t("chdmanInstallHint", installCommand);
   autoUpdateLabelText.textContent = t("autoUpdateLabel");
   languageLabelText.textContent = t("languageLabel");
   saveSettingsBtn.textContent = t("save");
@@ -688,20 +694,22 @@ cancelBtn.addEventListener("click", async () => {
 });
 
 // Windows paths use backslashes; the backend reports the source path exactly
-// as chdman/cmd.exe see it (an absolute path like "C:\Games\GameA\Track.cue"),
+// as it handed it to chdman (an absolute path like "C:\Games\GameA\Track.cue"),
 // while a ScannedDisc only carries { name, folder, kind } from the pre-scan.
 // Match by comparing the disc's folder+name against the tail of the reported
-// path, case-insensitively and with backslashes normalized to forward
-// slashes, so drive-letter casing or slash-style differences between the
-// scan and the log don't break the match. This assumes folder+name is
-// unique per run; two identically-named discs in different folders are
-// still disambiguated correctly since the folder is part of the comparison,
-// but a disc that appears twice under the *same* folder+name (not possible
+// path with backslashes normalized to forward slashes -- and, on Windows
+// only, case-insensitively, so drive-letter casing differences between the
+// scan and the event don't break the match. Linux/macOS compare exactly,
+// since there "Game.cue" and "game.cue" can be two different files. This
+// assumes folder+name is unique per run; two identically-named discs in
+// different folders are still disambiguated correctly since the folder is
+// part of the comparison, but a disc that appears twice under the *same* folder+name (not possible
 // from a single filesystem scan) would be ambiguous.
 function matchDiscByPath(path) {
-  const normalizedPath = path.toLowerCase().replace(/\\/g, "/");
+  const fold = (s) => (platform === "windows" ? s.toLowerCase() : s);
+  const normalizedPath = fold(path).replace(/\\/g, "/");
   return discs.find((d) => {
-    const discFull = `${d.folder}/${d.name}`.toLowerCase().replace(/\\/g, "/").replace(/\/+/g, "/");
+    const discFull = fold(`${d.folder}/${d.name}`).replace(/\\/g, "/").replace(/\/+/g, "/");
     return normalizedPath === discFull || normalizedPath.endsWith(`/${discFull}`.replace(/\/+/g, "/")) || normalizedPath.endsWith(discFull);
   });
 }
@@ -914,6 +922,9 @@ checkUpdatesBtn.addEventListener("click", async () => {
 (async () => {
   const config = await invoke("get_config");
   setLanguage(config.language);
+  platform = await invoke("get_platform");
+  setPlatform(platform);
+  if (platform !== "windows") chdmanPathInput.placeholder = "/usr/bin/chdman";
   appVersion = await window.__TAURI__.app.getVersion();
   applyTranslations();
   languageSelect.value = config.language;

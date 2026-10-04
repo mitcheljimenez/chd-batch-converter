@@ -1,0 +1,23 @@
+{
+  "bundle": {
+    "targets": [
+      "nsis"
+    ],
+    "resources": [
+      "build-assets/convertir_a_chd.bat",
+      "build-assets/chdman.exe"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "windows": {
+        "installMode": "quiet"
+      }
+    }
+  }
+}

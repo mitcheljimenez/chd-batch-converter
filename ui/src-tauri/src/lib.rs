@@ -7,7 +7,6 @@ mod organizer;
 mod scanner;
 mod settings;
 
-use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,14 +14,27 @@ use std::thread;
 use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
-/// Passed to every child process spawned here (`chdman`, `taskkill`) via
-/// `.creation_flags(...)`. Without it, each spawn briefly flashes a new
-/// console window, since these are all console-subsystem programs and the
-/// GUI app itself has none for them to inherit -- and conversion alone can
-/// spawn several `chdman` processes at once (see `converter::worker_count`),
-/// so this is the difference between one quiet run and a strobe of terminal
-/// windows.
+/// Passed (on Windows) to every child process spawned here (`chdman`,
+/// `taskkill`) via `hide_console`. Without it, each spawn briefly flashes a
+/// new console window, since these are all console-subsystem programs and
+/// the GUI app itself has none for them to inherit -- and conversion alone
+/// can spawn several `chdman` processes at once (see
+/// `converter::worker_count`), so this is the difference between one quiet
+/// run and a strobe of terminal windows.
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Keeps a spawned console program from opening its own window. Only
+/// Windows needs this; on Linux/macOS a child process never gets a window
+/// of its own, so it's a no-op there.
+pub(crate) fn hide_console(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
 
 use chd_mover::{move_chd_files as run_move_chd_files, MoveChdSummary};
 use flattener::{flatten_folders as run_flatten_folders, FlattenSummary};
@@ -230,21 +242,14 @@ fn strip_verbatim_prefix(path: &str) -> String {
     path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
 }
 
-/// Resolves the chdman.exe path the same way for every command that needs
-/// one: the user's configured path if set, otherwise the chdman.exe
-/// bundled next to convertir_a_chd.bat. Returns the same stable error
-/// codes (CHDMAN_NOT_CONFIGURED / CHDMAN_NOT_FOUND:<path>) regardless of
-/// caller, since the frontend's i18n.js translates them by exact string.
+/// Resolves the chdman path the same way for every command that needs
+/// one: the user's configured path if set, otherwise the platform default
+/// (see `default_chdman_path`). Returns the same stable error codes
+/// (CHDMAN_NOT_CONFIGURED / CHDMAN_NOT_FOUND:<path>) regardless of caller,
+/// since the frontend's i18n.js translates them by exact string.
 fn resolve_chdman_path(app_handle: &tauri::AppHandle, config: &Config) -> Result<String, String> {
     let chdman_path = if config.chdman_path.is_empty() {
-        let fallback = app_handle
-            .path()
-            .resolve("build-assets/chdman.exe", tauri::path::BaseDirectory::Resource)
-            .map_err(|_| "CHDMAN_NOT_CONFIGURED".to_string())?;
-        if !fallback.exists() {
-            return Err("CHDMAN_NOT_CONFIGURED".to_string());
-        }
-        strip_verbatim_prefix(&fallback.to_string_lossy())
+        default_chdman_path(app_handle).ok_or_else(|| "CHDMAN_NOT_CONFIGURED".to_string())?
     } else {
         strip_verbatim_prefix(&config.chdman_path)
     };
@@ -254,6 +259,53 @@ fn resolve_chdman_path(app_handle: &tauri::AppHandle, config: &Config) -> Result
     }
 
     Ok(chdman_path)
+}
+
+/// Windows: the chdman.exe bundled as an installer resource.
+#[cfg(windows)]
+fn default_chdman_path(app_handle: &tauri::AppHandle) -> Option<String> {
+    let bundled = app_handle
+        .path()
+        .resolve("build-assets/chdman.exe", tauri::path::BaseDirectory::Resource)
+        .ok()?;
+    bundled
+        .exists()
+        .then(|| strip_verbatim_prefix(&bundled.to_string_lossy()))
+}
+
+/// Linux/macOS: nothing is bundled (distros and Homebrew ship their own
+/// chdman), so look for one installed on the system.
+#[cfg(not(windows))]
+fn default_chdman_path(_app_handle: &tauri::AppHandle) -> Option<String> {
+    find_system_chdman(std::env::var_os("PATH"))
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+/// Where package managers put chdman, searched in addition to `$PATH`. A
+/// macOS app launched from Finder/Dock does *not* inherit the shell's
+/// `PATH`, so Homebrew's prefix (`/opt/homebrew/bin` on Apple Silicon,
+/// `/usr/local/bin` on Intel) would otherwise never be found. `/usr/games`
+/// is where some Debian-based distros install mame-tools.
+#[cfg(not(windows))]
+const SYSTEM_CHDMAN_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/usr/games"];
+
+#[cfg(not(windows))]
+fn find_system_chdman(path_var: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    let from_path = path_var
+        .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .unwrap_or_default();
+    from_path
+        .into_iter()
+        .chain(SYSTEM_CHDMAN_DIRS.iter().map(std::path::PathBuf::from))
+        .map(|dir| dir.join("chdman"))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The OS this build runs on ("windows", "linux", "macos"), so the
+/// frontend can show platform-specific help (e.g. how to install chdman).
+#[tauri::command]
+fn get_platform() -> &'static str {
+    std::env::consts::OS
 }
 
 #[tauri::command]
@@ -302,12 +354,22 @@ fn cancel_conversion(state: tauri::State<RunState>) -> Result<(), String> {
     // stops on its own before spawning another.
     let pids: Vec<u32> = std::mem::take(&mut *state.2.lock().map_err(|e| e.to_string())?);
     for pid in pids {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+        kill_process(pid);
     }
     Ok(())
+}
+
+/// Force-kills one `chdman` process by PID. `chdman` never spawns children
+/// of its own, so there's no process tree to worry about beyond `/T` on
+/// Windows (kept for parity with the old `.bat` design).
+#[cfg(windows)]
+fn kill_process(pid: u32) {
+    let _ = hide_console(Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"])).output();
+}
+
+#[cfg(unix)]
+fn kill_process(pid: u32) {
+    let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
 }
 
 /// What the frontend needs to render an "update available" prompt: just
@@ -530,7 +592,7 @@ fn start_conversion(
                         }
                     }
                     // A cancellation shows up as the same plain failure a
-                    // genuinely broken conversion would (the taskkill'd
+                    // genuinely broken conversion would (the killed
                     // chdman process just exits non-zero) -- distinguished
                     // here by checking the flag rather than the error
                     // string, so a real failure racing with cancellation
@@ -607,7 +669,8 @@ pub fn run() {
             cancel_conversion,
             check_for_update,
             install_update,
-            restart_app
+            restart_app,
+            get_platform
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -669,5 +732,138 @@ mod update_guard_tests {
         let state = fresh_state();
         let is_blocked = state.0.load(std::sync::atomic::Ordering::SeqCst);
         assert!(!is_blocked);
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod system_chdman_tests {
+    use super::find_system_chdman;
+    use std::fs;
+
+    #[test]
+    fn finds_chdman_in_a_path_entry() {
+        let dir = std::env::temp_dir().join("chd_ui_find_system_chdman_test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("chdman"), "").unwrap();
+
+        let path_var = std::env::join_paths([std::path::PathBuf::from("/nonexistent-dir"), dir.clone()]).unwrap();
+        assert_eq!(find_system_chdman(Some(path_var)), Some(dir.join("chdman")));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ignores_a_directory_named_chdman() {
+        let dir = std::env::temp_dir().join("chd_ui_find_system_chdman_dir_test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("chdman")).unwrap();
+
+        let path_var = std::env::join_paths([dir.clone()]).unwrap();
+        // Can't assert None outright: the machine running the tests may
+        // have a real chdman in one of SYSTEM_CHDMAN_DIRS.
+        assert_ne!(find_system_chdman(Some(path_var)), Some(dir.join("chdman")));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+/// End-to-end checks of the real conversion path (spawn chdman, stream its
+/// progress, verify, cancel) against a tiny shell-script stand-in for
+/// chdman. Unix-only: the Windows equivalent lives in tests/*.rs via the
+/// legacy .bat.
+#[cfg(all(test, unix))]
+mod unix_conversion_tests {
+    use super::{converter, kill_process};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+    use std::{fs, thread};
+
+    const MOCK_CHDMAN: &str = r#"#!/bin/sh
+# Minimal chdman stand-in: progress on stderr with bare \r like the real one.
+cmd="$1"
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-o" ]; then out="$2"; fi
+  shift
+done
+case "$cmd" in
+  createcd|createdvd)
+    if [ -n "$MOCK_CHDMAN_HANG" ]; then exec sleep 30; fi
+    printf 'Compressing, 50.0%% complete... (ratio=40.0%%)\r' >&2
+    printf 'Compressing, 100.0%% complete... (ratio=40.0%%)\n' >&2
+    printf 'chd' > "$out"
+    ;;
+  verify)
+    printf 'Verifying, 100.0%% complete...\n' >&2
+    ;;
+  *) exit 1 ;;
+esac
+"#;
+
+    fn setup(name: &str) -> (PathBuf, PathBuf) {
+        let work = std::env::temp_dir().join(name);
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work).unwrap();
+        let mock = work.join("chdman");
+        fs::write(&mock, MOCK_CHDMAN).unwrap();
+        fs::set_permissions(&mock, fs::Permissions::from_mode(0o755)).unwrap();
+        let disc = work.join("Game.cue");
+        fs::write(&disc, "FILE \"Game.bin\" BINARY\n").unwrap();
+        (mock, disc)
+    }
+
+    #[test]
+    fn converts_and_verifies_with_progress() {
+        let (mock, disc) = setup("chd_ui_unix_convert_test");
+        let pids = Arc::new(Mutex::new(Vec::new()));
+        let mut seen = Vec::new();
+
+        let out = converter::convert_disc(&mock, &disc, "cue", false, &pids, |phase, pct| {
+            seen.push((phase.to_string(), pct))
+        })
+        .expect("conversion should succeed");
+
+        assert_eq!(out, disc.with_extension("chd"));
+        assert!(out.is_file());
+        assert!(seen.contains(&("compressing".to_string(), 50.0)));
+        assert!(seen.contains(&("verifying".to_string(), 100.0)));
+        assert!(pids.lock().unwrap().is_empty(), "finished PIDs must be unregistered");
+        let _ = fs::remove_dir_all(disc.parent().unwrap());
+    }
+
+    #[test]
+    fn kill_process_stops_a_running_conversion() {
+        let (mock, disc) = setup("chd_ui_unix_cancel_test");
+        // Make the mock hang in its convert step until killed. Set via a
+        // wrapper rather than the test process's env, since tests run in
+        // parallel and share it.
+        let hanging = mock.with_file_name("chdman-hang");
+        fs::write(&hanging, format!("#!/bin/sh\nMOCK_CHDMAN_HANG=1 exec \"{}\" \"$@\"\n", mock.display())).unwrap();
+        fs::set_permissions(&hanging, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let pids = Arc::new(Mutex::new(Vec::new()));
+        let worker_pids = Arc::clone(&pids);
+        let worker_disc = disc.clone();
+        let started = Instant::now();
+        let worker = thread::spawn(move || {
+            converter::convert_disc(Path::new(&hanging), &worker_disc, "cue", false, &worker_pids, |_, _| {})
+        });
+
+        let pid = loop {
+            if let Some(&pid) = pids.lock().unwrap().first() {
+                break pid;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "chdman never registered its PID");
+            thread::sleep(Duration::from_millis(20));
+        };
+        kill_process(pid);
+
+        let result = worker.join().unwrap();
+        assert_eq!(result, Err("CONVERT_FAILED".to_string()));
+        assert!(started.elapsed() < Duration::from_secs(20), "kill didn't stop chdman");
+        let _ = fs::remove_dir_all(disc.parent().unwrap());
     }
 }

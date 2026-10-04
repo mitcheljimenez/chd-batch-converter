@@ -42,6 +42,27 @@
 4. Push both: `git push origin main --tags`
 
 Pushing the tag alone triggers `.github/workflows/release.yml`, which
-builds, code-signs, updater-signs, and publishes a GitHub Release named
-after the tag with the MSI, the NSIS setup `.exe`, and `latest.json`
-attached. No manual WSL build needed.
+runs one job per platform (Windows, Linux on `ubuntu-22.04`, macOS
+Apple Silicon and macOS Intel; `fail-fast: false`, so one failing doesn't
+cancel the rest). Each job builds, updater-signs, and uploads to the
+**same** GitHub Release named after the tag; `tauri-action` merges every
+platform into a single `latest.json` (`windows-x86_64`, `linux-x86_64`,
+`darwin-aarch64`, `darwin-x86_64`). Attached:
+
+- Windows: NSIS setup `.exe` (code-signed with the self-signed cert).
+- Linux: `.AppImage` (+ `.sig`, used by the updater) and `.deb` (no
+  auto-update).
+- macOS: one `.dmg` per architecture plus `.app.tar.gz` (+ `.sig`) for the
+  updater. Ad-hoc signed only (`signingIdentity: "-"` in
+  `tauri.macos.conf.json`), not notarized — no Apple secrets needed.
+
+The same `TAURI_SIGNING_PRIVATE_KEY` signs the updater artifacts for every
+platform. Only the Windows job imports the code-signing certificate.
+
+### Test release
+
+A tag with a hyphen (e.g. `v0.2.0-rc1`) is published as a **prerelease**,
+which `releases/latest` (and therefore the updater) ignores. Use one to
+check that every platform's assets and all four `latest.json` entries
+show up before cutting the real version. Delete the prerelease and its
+tag afterwards.

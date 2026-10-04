@@ -7,7 +7,28 @@ on:
 
 jobs:
   release:
-    runs-on: windows-latest
+    strategy:
+      # One platform failing (e.g. a macOS-only build hiccup) must not
+      # cancel the others: each job uploads its own assets to the same
+      # release, and tauri-action merges them into a single latest.json.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            rust-targets: x86_64-pc-windows-msvc
+            args: --config '{"bundle":{"windows":{"certificateThumbprint":"B67A6BC6ACA22ACA015E3E95B0950B84C3A09A9D","digestAlgorithm":"sha256"}}}'
+          # 22.04 rather than latest: the AppImage links against the build
+          # machine's glibc, so an older one runs on more distros.
+          - platform: ubuntu-22.04
+            rust-targets: ""
+            args: ""
+          - platform: macos-latest
+            rust-targets: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            rust-targets: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+    runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
     steps:
@@ -19,13 +40,20 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Install Linux system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install frontend dependencies
         run: npm install
         working-directory: ui
 
       - name: Import code-signing certificate
+        if: matrix.platform == 'windows-latest'
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -48,5 +76,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "CHD Converter ${{ github.ref_name }}"
           releaseDraft: false
-          prerelease: false
-          args: --config '{"bundle":{"windows":{"certificateThumbprint":"B67A6BC6ACA22ACA015E3E95B0950B84C3A09A9D","digestAlgorithm":"sha256"}}}'
+          # Tags like v0.2.0-rc1 publish as a prerelease, so they never
+          # become releases/latest (which the updater reads).
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: ${{ matrix.args }}

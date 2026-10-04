@@ -9,7 +9,9 @@ const translations = {
     cancel: "Cancelar",
     settings: "Configuración",
     history: "Historial",
-    chdmanPathLabel: "Ruta de chdman.exe",
+    chdmanPathLabel: "Ruta de chdman",
+    chdmanInstallHint: (command) =>
+      `Déjalo vacío para usar el chdman instalado en el sistema. Si no lo tienes: ${command}`,
     autoUpdateLabel: "Instalar actualizaciones automáticamente",
     languageLabel: "Idioma",
     save: "Guardar",
@@ -99,9 +101,12 @@ const translations = {
     updateDismiss: "Cerrar",
     versionLabel: (version) => `Versión instalada: ${version}`,
     errors: {
-      CHDMAN_NOT_CONFIGURED: "No se configuró la ruta de chdman.exe",
+      CHDMAN_NOT_CONFIGURED: () =>
+        chdmanInstallCommand()
+          ? `No se encontró chdman en el sistema. Instálalo con: ${chdmanInstallCommand()}. También puedes indicar su ruta en Configuración.`
+          : "No se configuró la ruta de chdman.exe",
       CHDMAN_NOT_FOUND: (path) =>
-        `chdman.exe no encontrado en la ruta configurada: ${path}`,
+        `chdman no encontrado en la ruta configurada: ${path}`,
       SCRIPT_NOT_FOUND: "No se encontró el script de conversión incluido",
       CONVERSION_IN_PROGRESS: "Ya hay una conversión en curso",
       UPDATE_DEFERRED_CONVERSION_IN_PROGRESS:
@@ -124,7 +129,9 @@ const translations = {
     cancel: "Cancel",
     settings: "Settings",
     history: "History",
-    chdmanPathLabel: "Path to chdman.exe",
+    chdmanPathLabel: "Path to chdman",
+    chdmanInstallHint: (command) =>
+      `Leave empty to use the chdman installed on your system. If you don't have it: ${command}`,
     autoUpdateLabel: "Install updates automatically",
     languageLabel: "Language",
     save: "Save",
@@ -214,9 +221,12 @@ const translations = {
     updateDismiss: "Close",
     versionLabel: (version) => `Installed version: ${version}`,
     errors: {
-      CHDMAN_NOT_CONFIGURED: "chdman.exe path is not configured",
+      CHDMAN_NOT_CONFIGURED: () =>
+        chdmanInstallCommand()
+          ? `chdman was not found on this system. Install it with: ${chdmanInstallCommand()}. You can also set its path in Settings.`
+          : "chdman.exe path is not configured",
       CHDMAN_NOT_FOUND: (path) =>
-        `chdman.exe not found at the configured path: ${path}`,
+        `chdman not found at the configured path: ${path}`,
       SCRIPT_NOT_FOUND: "The bundled conversion script was not found",
       CONVERSION_IN_PROGRESS: "A conversion is already in progress",
       UPDATE_DEFERRED_CONVERSION_IN_PROGRESS:
@@ -232,6 +242,25 @@ const translations = {
 };
 
 let currentLanguage = "es";
+// "windows" | "linux" | "macos" (from the backend's get_platform). Windows
+// bundles chdman.exe with the installer; elsewhere it comes from the
+// system's package manager, so errors/settings show how to install it.
+let currentPlatform = "windows";
+
+export function setPlatform(platform) {
+  currentPlatform = platform;
+}
+
+export function chdmanInstallCommand() {
+  switch (currentPlatform) {
+    case "macos":
+      return "brew install rom-tools";
+    case "linux":
+      return "sudo apt install mame-tools (Debian/Ubuntu) · sudo pacman -S mame-tools (Arch) · sudo dnf install mame-tools (Fedora)";
+    default:
+      return null;
+  }
+}
 
 export function setLanguage(language) {
   currentLanguage = translations[language] ? language : "es";

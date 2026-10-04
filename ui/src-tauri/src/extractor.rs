@@ -1,5 +1,4 @@
 use std::io::Read;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -41,10 +40,7 @@ pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
         if !is_chd {
             continue;
         }
-        let kind = Command::new(chdman_path)
-            .args(["info", "-i"])
-            .arg(path)
-            .creation_flags(crate::CREATE_NO_WINDOW)
+        let kind = crate::hide_console(Command::new(chdman_path).args(["info", "-i"]).arg(path))
             .output()
             .map(|out| classify_chd_info(&String::from_utf8_lossy(&out.stdout)).to_string())
             .unwrap_or_else(|_| "unknown".to_string());
@@ -152,10 +148,8 @@ fn run_with_progress(
         command.arg("-o").arg(out_path);
     }
 
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(crate::CREATE_NO_WINDOW)
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = crate::hide_console(&mut command)
         .spawn()
         .map_err(|_| ())?;
 

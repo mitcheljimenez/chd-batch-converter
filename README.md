@@ -31,7 +31,7 @@ generated file.
 ## Desktop app
 
 If you'd rather not use the command line, there's a desktop app with a
-graphical interface (Windows) in [`ui/`](ui/), with folder selection, live
+graphical interface (Windows, Linux and macOS) in [`ui/`](ui/), with folder selection, live
 progress, conversion history, automatic updates, **parallel conversion**
 (several `chdman` processes run at once, one per CPU core, instead of
 converting discs one at a time), an ES-DE multi-disc
@@ -50,36 +50,36 @@ installers are available on
 Rough priority order, highest first — not commitments or dates, just
 where effort would likely pay off most:
 
-1. **Linux and macOS builds of the desktop app.** Tauri already targets
-   both; the real work is replacing `convertir_a_chd.bat`'s Windows-only
-   pieces (`cmd.exe`/batch, `\\?\`-prefixed paths, `taskkill`) with a
-   cross-platform conversion path, and — for macOS — code-signing and
-   notarization so Gatekeeper doesn't block the app outright (Windows
-   SmartScreen at least lets you click through).
-2. **A real code-signing certificate.** The self-signed one works but
-   still shows an "unknown publisher" warning on every fresh install;
-   a certificate from a public CA would remove that, at a real
-   recurring cost.
-3. **A "verify only" pass** — re-run `chdman verify` against existing
+1. **A real code-signing certificate.** The self-signed one works but
+   still shows an "unknown publisher" warning on every fresh Windows
+   install, and the macOS build is only ad-hoc signed (not notarized), so
+   Gatekeeper needs a one-time "Open Anyway". A certificate from a public
+   CA / an Apple Developer account would remove both, at a real recurring
+   cost.
+2. **A "verify only" pass** — re-run `chdman verify` against existing
    `.chd` files without reconverting or extracting, useful after a drive
    move or to catch bit rot. The desktop app already runs `chdman verify`
    as part of both conversion and extraction; this would add a standalone
    pass over files that aren't otherwise being touched.
-4. **CI smoke tests on every push**, not just the release pipeline —
-   catch a broken build before it's tagged, not after.
-5. **More languages** if there's demand — the Settings selector already
+3. **More languages** if there's demand — the Settings selector already
    supports adding a language as a self-contained dictionary in
    `ui/src/i18n.js`, so this is mostly translation work, not plumbing.
-6. **A conversion log viewer in the app** — right now a failure only
+4. **A conversion log viewer in the app** — right now a failure only
    shows a short message; being able to expand it to the full
    `conversion_log.txt` for that game would help diagnosing chdman
    errors without leaving the app.
-7. **Config profiles** for people who juggle more than one ROMs
+5. **Config profiles** for people who juggle more than one ROMs
    directory or chdman path (e.g. separate PC and handheld libraries).
 
 Done: **parallel conversion** in the desktop app — see [`ui/README.md`](ui/README.md)
 for details. (The plain `.bat` script above still converts one disc at a
 time; only the desktop app runs several `chdman` processes concurrently.)
+
+Done: **Linux and macOS builds of the desktop app** — see
+[`ui/README.md`](ui/README.md#linux-and-macos).
+
+Done: **CI tests on every push** (`cargo test` on Windows, Linux and
+macOS — `.github/workflows/ci.yml`).
 
 ## Tests
 
