@@ -36,6 +36,7 @@
           <button id="nav-move-chd" class="nav-item">Mover .chd</button>
           <button id="nav-flatten" class="nav-item">Aplanar carpetas</button>
           <button id="nav-extract" class="nav-item">Extraer .chd</button>
+          <button id="nav-verify" class="nav-item">Verificar .chd</button>
           <button id="nav-history" class="nav-item">Historial</button>
           <button id="nav-settings" class="nav-item">Configuración</button>
         </nav>
@@ -108,6 +109,18 @@
             </div>
             <div id="extract-progress-track" style="display:none"><div id="extract-progress-fill"></div></div>
             <div id="extract-table"></div>
+          </section>
+
+          <section id="verify-view" class="view panel-view" style="display:none">
+            <p id="verify-explanation"></p>
+            <p id="verify-no-folder-hint">Elige una carpeta primero.</p>
+            <div class="toolbar">
+              <button id="verify-all-btn" disabled>Verificar todos</button>
+              <button id="verify-cancel-btn" class="secondary" style="display:none">Cancelar</button>
+            </div>
+            <p id="verify-summary" style="display:none"></p>
+            <div id="verify-progress-track" style="display:none"><div id="verify-progress-fill"></div></div>
+            <div id="verify-table"></div>
           </section>
 
           <section id="history-view" class="view panel-view" style="display:none">

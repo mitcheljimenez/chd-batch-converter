@@ -87,6 +87,18 @@ const translations = {
         : "."),
     flattenFailed: (err) => `No se pudo aplanar: ${err}`,
     navExtract: "Extraer .chd",
+    navVerify: "Verificar .chd",
+    verifyExplanation:
+      "Comprueba que tus .chd sigan intactos: chdman relee cada archivo y lo compara con la huella guardada dentro. Útil tras copiarlos a otro disco, a una tarjeta SD o a la consola. No modifica nada.",
+    verifyAllBtn: "Verificar todos",
+    verifyNoFilesFound: "No se encontraron archivos .chd en esta carpeta.",
+    verifyPhase: (percent) => `Verificando ${percent}%`,
+    verifyOk: "intacto",
+    verifyFailed: "DAÑADO: no coincide con su huella; conviene volver a convertirlo desde el original",
+    verifySummary: (ok, failed) =>
+      failed > 0 ? `${ok} intactos, ${failed} dañados` : `Los ${ok} archivos están intactos`,
+    verifySummaryCancelled: (ok, failed) => `Cancelado: ${ok} intactos, ${failed} dañados hasta ahora`,
+    notifyVerifyDone: "Verificación terminada",
     extractExplanation:
       "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso, .bin/.cue o .gdi (Dreamcast), detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.",
     extractNoFolderHint: "Elige una carpeta primero.",
@@ -130,6 +142,7 @@ const translations = {
       EXTRACT_FAILED: "chdman no pudo extraer este archivo",
       EXTRACT_VERIFY_FAILED: "Se extrajo el archivo, pero chdman no pudo verificar el .chd original",
       EXTRACT_IN_PROGRESS: "Ya hay una extracción en curso",
+      VERIFY_IN_PROGRESS: "Ya hay una verificación en curso",
     },
   },
   en: {
@@ -220,6 +233,18 @@ const translations = {
         : "."),
     flattenFailed: (err) => `Could not flatten: ${err}`,
     navExtract: "Extract .chd",
+    navVerify: "Verify .chd",
+    verifyExplanation:
+      "Checks that your .chd files are still intact: chdman re-reads each one and compares it with the fingerprint stored inside. Useful after copying them to another drive, an SD card or a console. Changes nothing.",
+    verifyAllBtn: "Verify all",
+    verifyNoFilesFound: "No .chd files found in this folder.",
+    verifyPhase: (percent) => `Verifying ${percent}%`,
+    verifyOk: "intact",
+    verifyFailed: "CORRUPT: doesn't match its fingerprint; reconvert it from the original if you can",
+    verifySummary: (ok, failed) =>
+      failed > 0 ? `${ok} intact, ${failed} corrupt` : `All ${ok} files are intact`,
+    verifySummaryCancelled: (ok, failed) => `Cancelled: ${ok} intact, ${failed} corrupt so far`,
+    notifyVerifyDone: "Verification finished",
     extractExplanation:
       "This looks for .chd files in the chosen folder and lets you extract them back to .iso, .bin/.cue or .gdi (Dreamcast), auto-detecting the format and verifying the original .chd after each extraction. The original .chd is never touched or deleted.",
     extractNoFolderHint: "Choose a folder first.",
@@ -263,6 +288,7 @@ const translations = {
       EXTRACT_FAILED: "chdman failed to extract this file",
       EXTRACT_VERIFY_FAILED: "The file was extracted, but chdman could not verify the original .chd",
       EXTRACT_IN_PROGRESS: "An extraction is already in progress",
+      VERIFY_IN_PROGRESS: "A verification is already in progress",
     },
   },
 };

@@ -7,6 +7,7 @@ pub mod log_tail;
 mod organizer;
 mod scanner;
 mod settings;
+mod verifier;
 
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -107,6 +108,102 @@ struct ExtractAllFinished {
 /// since extraction always runs one item at a time from a single background
 /// thread, unlike conversion's pool of `converter::worker_count` workers.
 struct ExtractState(Arc<AtomicBool>);
+
+/// Whether a verify-only pass is running (`.0`, claimed with swap like
+/// `ExtractState`) and whether the user asked to stop it (`.1`). Cancelling
+/// stops before the next file rather than killing the chdman in flight:
+/// verify only reads, so letting the current file finish is harmless.
+struct VerifyState(Arc<AtomicBool>, Arc<AtomicBool>);
+
+#[derive(serde::Serialize, Clone)]
+struct VerifyProgressEvent {
+    chd_path: String,
+    percent: f32,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct VerifyItemDone {
+    chd_path: String,
+    ok: bool,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct VerifyAllFinished {
+    ok: u32,
+    failed: u32,
+    cancelled: bool,
+}
+
+/// Lists every `.chd` under `root` for the "Verificar .chd" view.
+#[tauri::command]
+fn prescan_verify(root: String) -> Vec<verifier::ScannedChdFile> {
+    verifier::scan_all_chds(std::path::Path::new(&root))
+}
+
+/// Runs `chdman verify` on each path in `chd_paths`, one at a time, from a
+/// background thread: `verify-item-progress` while each runs,
+/// `verify-item-done` with the verdict, then `verify-all-finished`.
+#[tauri::command]
+fn start_verify_all(
+    window: tauri::Window,
+    app_handle: tauri::AppHandle,
+    chd_paths: Vec<String>,
+    state: tauri::State<VerifyState>,
+) -> Result<(), String> {
+    if state.0.swap(true, Ordering::SeqCst) {
+        return Err("VERIFY_IN_PROGRESS".to_string());
+    }
+    state.1.store(false, Ordering::SeqCst);
+
+    let chdman_path = match resolve_app_config_dir(&app_handle)
+        .and_then(|dir| resolve_chdman_path(&app_handle, &load_config(&dir)))
+    {
+        Ok(path) => path,
+        Err(e) => {
+            state.0.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
+    };
+
+    let running_flag = state.0.clone();
+    let cancelled_flag = state.1.clone();
+    thread::spawn(move || {
+        let (mut ok, mut failed) = (0u32, 0u32);
+        for chd_path in chd_paths {
+            if cancelled_flag.load(Ordering::SeqCst) {
+                break;
+            }
+            let progress_window = window.clone();
+            let progress_path = chd_path.clone();
+            let result = verifier::verify_chd(
+                std::path::Path::new(&chdman_path),
+                std::path::Path::new(&chd_path),
+                |_, percent| {
+                    let _ = progress_window.emit(
+                        "verify-item-progress",
+                        VerifyProgressEvent { chd_path: progress_path.clone(), percent },
+                    );
+                },
+            );
+            if result.is_ok() {
+                ok += 1;
+            } else {
+                failed += 1;
+            }
+            let _ = window.emit("verify-item-done", VerifyItemDone { chd_path, ok: result.is_ok() });
+        }
+        let cancelled = cancelled_flag.load(Ordering::SeqCst);
+        let _ = window.emit("verify-all-finished", VerifyAllFinished { ok, failed, cancelled });
+        running_flag.store(false, Ordering::SeqCst);
+    });
+    Ok(())
+}
+
+/// Stops a verify pass after the file currently being checked.
+#[tauri::command]
+fn cancel_verify(state: tauri::State<VerifyState>) {
+    state.1.store(true, Ordering::SeqCst);
+}
 
 /// Unpacks every `.chd` in `items` back to its original format (`.cue`+
 /// `.bin` for `kind == "cd"`, `.iso` for `kind == "dvd"`), one at a time,
@@ -718,6 +815,7 @@ pub fn run() {
             Arc::new(Mutex::new(Vec::new())),
         ))
         .manage(ExtractState(Arc::new(AtomicBool::new(false))))
+        .manage(VerifyState(Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false))))
         .invoke_handler(tauri::generate_handler![
             greet,
             prescan,
@@ -736,7 +834,10 @@ pub fn run() {
             restart_app,
             get_platform,
             folder_exists,
-            folder_for_drop
+            folder_for_drop,
+            prescan_verify,
+            start_verify_all,
+            cancel_verify
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -840,7 +941,7 @@ mod system_chdman_tests {
 /// legacy .bat.
 #[cfg(all(test, unix))]
 mod unix_conversion_tests {
-    use super::{converter, kill_process};
+    use super::{converter, kill_process, verifier};
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
@@ -965,6 +1066,25 @@ esac
 
         assert_eq!(result, Err("CONVERT_FAILED".to_string()));
         assert_eq!(fs::read_to_string(&existing).unwrap(), "user's own chd");
+        let _ = fs::remove_dir_all(disc.parent().unwrap());
+    }
+
+    #[test]
+    fn verify_reports_a_good_chd_and_a_corrupt_one() {
+        let (mock, disc) = setup("chd_ui_unix_verify_test");
+        let chd = disc.with_extension("chd");
+        fs::write(&chd, "chd").unwrap();
+        let mut seen = Vec::new();
+        assert_eq!(verifier::verify_chd(&mock, &chd, |phase, pct| seen.push((phase.to_string(), pct))), Ok(()));
+        assert!(seen.contains(&("verifying".to_string(), 100.0)));
+
+        // A chdman that finds a hash mismatch exits non-zero.
+        let corrupt = mock.with_file_name("chdman-corrupt");
+        fs::write(&corrupt, "#!/bin/sh\necho 'Error: Raw SHA1 in header = 1234' >&2\nexit 1\n").unwrap();
+        fs::set_permissions(&corrupt, fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_runnable(&corrupt);
+        assert_eq!(verifier::verify_chd(&corrupt, &chd, |_, _| {}), Err("VERIFY_FAILED".to_string()));
+
         let _ = fs::remove_dir_all(disc.parent().unwrap());
     }
 }

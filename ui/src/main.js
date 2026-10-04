@@ -70,6 +70,16 @@ const flattenExplanation = document.getElementById("flatten-explanation");
 const flattenNoFolderHint = document.getElementById("flatten-no-folder-hint");
 const runFlattenBtn = document.getElementById("run-flatten-btn");
 const navExtract = document.getElementById("nav-extract");
+const navVerify = document.getElementById("nav-verify");
+const verifyView = document.getElementById("verify-view");
+const verifyExplanation = document.getElementById("verify-explanation");
+const verifyNoFolderHint = document.getElementById("verify-no-folder-hint");
+const verifyAllBtn = document.getElementById("verify-all-btn");
+const verifyCancelBtn = document.getElementById("verify-cancel-btn");
+const verifySummary = document.getElementById("verify-summary");
+const verifyProgressTrack = document.getElementById("verify-progress-track");
+const verifyProgressFill = document.getElementById("verify-progress-fill");
+const verifyTable = document.getElementById("verify-table");
 const extractView = document.getElementById("extract-view");
 const extractExplanation = document.getElementById("extract-explanation");
 const extractNoFolderHint = document.getElementById("extract-no-folder-hint");
@@ -106,6 +116,7 @@ const views = {
   moveChd: moveChdView,
   flatten: flattenView,
   extract: extractView,
+  verify: verifyView,
   history: historyView,
   settings: settingsView,
 };
@@ -115,6 +126,7 @@ const navButtons = {
   moveChd: navMoveChd,
   flatten: navFlatten,
   extract: navExtract,
+  verify: navVerify,
   history: navHistory,
   settings: navSettings,
 };
@@ -156,6 +168,15 @@ async function showView(name) {
       renderExtractTable();
       updateExtractAllAvailability();
     }
+  } else if (name === "verify") {
+    // Same caching rule as Extract: rescan on the first visit for a folder
+    // (or after something changed its .chd files), never mid-run.
+    verifyNoFolderHint.style.display = currentFolder ? "none" : "block";
+    if (currentFolder && verifyScannedForFolder !== currentFolder && !verifyRunning) {
+      await rescanVerify();
+    } else {
+      renderVerifyTable();
+    }
   }
 }
 
@@ -164,6 +185,7 @@ navOrganize.addEventListener("click", () => showView("organize"));
 navMoveChd.addEventListener("click", () => showView("moveChd"));
 navFlatten.addEventListener("click", () => showView("flatten"));
 navExtract.addEventListener("click", () => showView("extract"));
+navVerify.addEventListener("click", () => showView("verify"));
 navHistory.addEventListener("click", () => showView("history"));
 navSettings.addEventListener("click", () => showView("settings"));
 
@@ -235,6 +257,12 @@ function applyTranslations() {
   runFlattenBtn.textContent = t("runFlatten");
   navExtract.textContent = t("navExtract");
   extractExplanation.textContent = t("extractExplanation");
+  navVerify.textContent = t("navVerify");
+  verifyExplanation.textContent = t("verifyExplanation");
+  verifyAllBtn.textContent = t("verifyAllBtn");
+  verifyCancelBtn.textContent = t("cancel");
+  verifyNoFolderHint.textContent = t("flattenNoFolderHint");
+  extractNoFolderHint.textContent = t("flattenNoFolderHint");
   extractAllBtn.textContent = t("extractAllBtn");
 }
 
@@ -436,6 +464,7 @@ let chdsScannedForFolder = null;
 // instead of showing the pre-change scan.
 function invalidateChdScan() {
   chdsScannedForFolder = null;
+  verifyScannedForFolder = null;
 }
 // The items the in-flight run() was started with -- NOT always all of
 // `chds` (a single row's "Extraer" button runs just that one item). The
@@ -643,13 +672,144 @@ async function selectFolder(folder) {
 
   await rescan(folder);
   await rescanChds();
+  verifyScannedForFolder = null;
+  if (verifyView.style.display !== "none") await rescanVerify();
 }
+
+// ---- Verificar .chd ----------------------------------------------------
+// Re-runs `chdman verify` over existing .chd files without converting or
+// extracting anything, to catch copies corrupted after the fact.
+let verifyItems = []; // { name, folder, status: "pending"|"ok"|"fail", percent? }
+let verifyScannedForFolder = null;
+let verifyRunning = false;
+
+async function rescanVerify() {
+  verifyNoFolderHint.style.display = currentFolder ? "none" : "block";
+  verifySummary.style.display = "none";
+  if (!currentFolder) {
+    verifyItems = [];
+    verifyScannedForFolder = null;
+    renderVerifyTable();
+    return;
+  }
+  const scanned = await invoke("prescan_verify", { root: currentFolder });
+  verifyItems = scanned.map((c) => ({ ...c, status: "pending" }));
+  verifyScannedForFolder = currentFolder;
+  renderVerifyTable();
+}
+
+function renderVerifyTable() {
+  verifyTable.innerHTML = "";
+  verifyAllBtn.disabled = verifyRunning || verifyItems.length === 0;
+  if (currentFolder && verifyItems.length === 0) {
+    verifyTable.appendChild(mk("disc-message", t("verifyNoFilesFound")));
+    return;
+  }
+  for (const item of verifyItems) {
+    const row = document.createElement("div");
+    row.className = "disc-row";
+    const main = document.createElement("div");
+    main.className = "disc-row-main";
+    const icon = { pending: "•", ok: "✅", fail: "❌" }[item.status];
+    let message = "";
+    if (item.status === "ok") message = t("verifyOk");
+    else if (item.status === "fail") message = t("verifyFailed");
+    else if (item.percent !== undefined) message = t("verifyPhase", Math.round(item.percent));
+    main.append(mk(`disc-status-icon status-${item.status}`, icon), mk("disc-name", item.name), mk("disc-message", message));
+    row.appendChild(main);
+    if (item.status === "pending" && item.percent !== undefined) {
+      const track = document.createElement("div");
+      track.className = "disc-progress-track";
+      const fill = document.createElement("div");
+      fill.className = "disc-progress-fill";
+      fill.style.width = `${Math.round(item.percent)}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+    }
+    verifyTable.appendChild(row);
+  }
+}
+
+function updateVerifyProgress() {
+  const total = verifyItems.length;
+  if (total === 0) return;
+  let done = 0;
+  for (const item of verifyItems) {
+    if (item.status !== "pending") done += 1;
+    else if (item.percent !== undefined) done += item.percent / 100;
+  }
+  verifyProgressFill.style.width = `${(done / total) * 100}%`;
+}
+
+function findVerifyItem(path) {
+  return verifyItems.find((item) => joinPath(item.folder, item.name) === path);
+}
+
+verifyAllBtn.addEventListener("click", async () => {
+  if (verifyRunning || verifyItems.length === 0) return;
+  verifyRunning = true;
+  for (const item of verifyItems) {
+    item.status = "pending";
+    delete item.percent;
+  }
+  verifySummary.style.display = "none";
+  verifyAllBtn.disabled = true;
+  verifyCancelBtn.style.display = "inline-block";
+  verifyProgressTrack.style.display = "block";
+  verifyProgressFill.style.width = "0%";
+  renderVerifyTable();
+  try {
+    await invoke("start_verify_all", { chdPaths: verifyItems.map((item) => joinPath(item.folder, item.name)) });
+  } catch (err) {
+    verifyRunning = false;
+    verifyCancelBtn.style.display = "none";
+    verifyProgressTrack.style.display = "none";
+    renderVerifyTable();
+    alert(translateError(err));
+  }
+});
+
+verifyCancelBtn.addEventListener("click", async () => {
+  await invoke("cancel_verify");
+});
+
+listen("verify-item-progress", (event) => {
+  const item = findVerifyItem(event.payload.chd_path);
+  if (item && item.status === "pending") {
+    item.percent = event.payload.percent;
+    renderVerifyTable();
+    updateVerifyProgress();
+  }
+});
+
+listen("verify-item-done", (event) => {
+  const item = findVerifyItem(event.payload.chd_path);
+  if (item) {
+    item.status = event.payload.ok ? "ok" : "fail";
+    delete item.percent;
+    renderVerifyTable();
+    updateVerifyProgress();
+  }
+});
+
+listen("verify-all-finished", (event) => {
+  const { ok, failed, cancelled } = event.payload;
+  verifyRunning = false;
+  verifyCancelBtn.style.display = "none";
+  verifyProgressTrack.style.display = "none";
+  for (const item of verifyItems) delete item.percent;
+  verifySummary.textContent = t(cancelled ? "verifySummaryCancelled" : "verifySummary", ok, failed);
+  verifySummary.className = failed > 0 ? "status-fail" : "status-ok";
+  verifySummary.style.display = "block";
+  renderVerifyTable();
+  if (!cancelled) notifyIfAway(t("notifyVerifyDone"), t("verifySummary", ok, failed));
+});
 
 // Dropping a folder (or any file inside one) on the window opens it, the
 // same as picking it. Ignored while converting or extracting, so a stray
 // drop can't switch folders out from under a running batch.
 function isBusy() {
-  return cancelBtn.style.display !== "none" || extractRunning;
+  return cancelBtn.style.display !== "none" || extractRunning || verifyRunning;
 }
 
 window.__TAURI__.webview.getCurrentWebview().onDragDropEvent(async (event) => {

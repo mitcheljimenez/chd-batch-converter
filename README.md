@@ -58,19 +58,14 @@ where effort would likely pay off most:
    Gatekeeper needs a one-time "Open Anyway". A certificate from a public
    CA / an Apple Developer account would remove both, at a real recurring
    cost.
-2. **A "verify only" pass** — re-run `chdman verify` against existing
-   `.chd` files without reconverting or extracting, useful after a drive
-   move or to catch bit rot. The desktop app already runs `chdman verify`
-   as part of both conversion and extraction; this would add a standalone
-   pass over files that aren't otherwise being touched.
-3. **More languages** if there's demand — the Settings selector already
+2. **More languages** if there's demand — the Settings selector already
    supports adding a language as a self-contained dictionary in
    `ui/src/i18n.js`, so this is mostly translation work, not plumbing.
-4. **A conversion log viewer in the app** — right now a failure only
+3. **A conversion log viewer in the app** — right now a failure only
    shows a short message; being able to expand it to the full
    `conversion_log.txt` for that game would help diagnosing chdman
    errors without leaving the app.
-5. **Config profiles** for people who juggle more than one ROMs
+4. **Config profiles** for people who juggle more than one ROMs
    directory or chdman path (e.g. separate PC and handheld libraries).
 
 Done: **parallel conversion** in the desktop app — see [`ui/README.md`](ui/README.md)
@@ -79,6 +74,9 @@ time; only the desktop app runs several `chdman` processes concurrently.)
 
 Done: **Linux and macOS builds of the desktop app** — see
 [`ui/README.md`](ui/README.md#linux-and-macos).
+
+Done: **a "verify only" pass** — "Verificar .chd" in the desktop app
+re-runs `chdman verify` over existing `.chd` files.
 
 Done: **CI tests on every push** (`cargo test` on Windows, Linux and
 macOS — `.github/workflows/ci.yml`).

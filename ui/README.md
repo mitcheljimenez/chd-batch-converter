@@ -154,6 +154,16 @@ todo" on that folder to get a fresh, DVD-zlib `.chd`. The original `.chd`
 is never deleted or modified — extraction is refused instead of
 overwriting if the destination file already exists.
 
+## Verificar .chd
+
+Checks that `.chd` files you already have are still intact, without
+converting or extracting anything: `chdman verify` re-reads each one and
+compares it with the SHA-1 stored inside it. Handy after copying a
+library to another drive, an SD card or a handheld. Each file shows
+"intacto" or "DAÑADO" (a corrupt one should be reconverted from its
+original), "Cancelar" stops after the file in progress, and nothing is
+ever modified.
+
 ## Auto-update
 
 The app checks GitHub Releases for new versions automatically:

@@ -220,10 +220,10 @@ button.secondary { background: var(--surface-hover); }
 
 #move-chd-no-folder-hint { color: var(--text-dim); font-style: italic; }
 
-#extract-no-folder-hint { color: var(--text-dim); font-style: italic; }
+#extract-no-folder-hint, #verify-no-folder-hint { color: var(--text-dim); font-style: italic; }
 #chdman-install-hint, #parallel-conversion-hint { color: var(--text-dim); font-size: 12px; margin: 0; user-select: text; }
 
-#extract-progress-track {
+#extract-progress-track, #verify-progress-track {
   height: 8px;
   border-radius: 4px;
   background: var(--bg);
@@ -231,7 +231,7 @@ button.secondary { background: var(--surface-hover); }
   margin-top: 8px;
 }
 
-#extract-progress-fill {
+#extract-progress-fill, #verify-progress-fill {
   height: 100%;
   width: 0%;
   transition: width 0.35s ease-out;
@@ -247,7 +247,7 @@ button.secondary { background: var(--surface-hover); }
   animation: progress-shimmer 1.6s linear infinite;
 }
 
-#extract-table {
+#extract-table, #verify-table {
   flex: 1;
   overflow-y: auto;
   background: var(--bg);

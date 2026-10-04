@@ -147,7 +147,7 @@ pub fn extract_chd_with_progress(
 /// required to be `Send`). Returns `Err(())` on a spawn failure or non-zero
 /// exit; the caller maps that to the specific stable error code for its
 /// context (extraction vs. verify).
-fn run_with_progress(
+pub(crate) fn run_with_progress(
     chdman_path: &Path,
     subcommand: &str,
     chd_path: &Path,
