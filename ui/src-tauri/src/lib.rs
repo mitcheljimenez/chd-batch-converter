@@ -1,4 +1,5 @@
 mod chd_mover;
+mod chdman;
 mod converter;
 mod disc_files;
 mod extractor;
@@ -96,6 +97,8 @@ struct ExtractItemDone {
     chd_path: String,
     output: Option<String>,
     error: Option<String>,
+    /// chdman's own output when extraction failed, for "Ver detalles".
+    log: Option<String>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -125,6 +128,8 @@ struct VerifyProgressEvent {
 struct VerifyItemDone {
     chd_path: String,
     ok: bool,
+    /// What chdman reported when the file didn't verify.
+    log: Option<String>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -185,12 +190,17 @@ fn start_verify_all(
                     );
                 },
             );
-            if result.is_ok() {
-                ok += 1;
-            } else {
-                failed += 1;
-            }
-            let _ = window.emit("verify-item-done", VerifyItemDone { chd_path, ok: result.is_ok() });
+            let item = match result {
+                Ok(()) => {
+                    ok += 1;
+                    VerifyItemDone { chd_path, ok: true, log: None }
+                }
+                Err(e) => {
+                    failed += 1;
+                    VerifyItemDone { chd_path, ok: false, log: Some(e.log).filter(|l| !l.is_empty()) }
+                }
+            };
+            let _ = window.emit("verify-item-done", item);
         }
         let cancelled = cancelled_flag.load(Ordering::SeqCst);
         let _ = window.emit("verify-all-finished", VerifyAllFinished { ok, failed, cancelled });
@@ -268,6 +278,7 @@ fn start_extract_all(
                         chd_path: item.chd_path.clone(),
                         output: Some(output.to_string_lossy().to_string()),
                         error: None,
+                        log: None,
                     }
                 }
                 Err(e) => {
@@ -275,7 +286,8 @@ fn start_extract_all(
                     ExtractItemDone {
                         chd_path: item.chd_path.clone(),
                         output: None,
-                        error: Some(e),
+                        error: Some(e.code),
+                        log: Some(e.log).filter(|l| !l.is_empty()),
                     }
                 }
             };
@@ -592,6 +604,8 @@ struct DiscResult {
     /// Size of the original files and of the new .chd, on success only.
     original_bytes: Option<u64>,
     chd_bytes: Option<u64>,
+    /// chdman's own output when the disc failed, for "Ver detalles".
+    log: Option<String>,
 }
 
 /// Converts every eligible disc under `root` in parallel, one `chdman`
@@ -744,6 +758,7 @@ fn start_conversion(
                             note,
                             original_bytes: Some(original_size),
                             chd_bytes: Some(chd_size),
+                            log: None,
                         }
                     }
                     // A cancellation shows up as the same plain failure a
@@ -755,7 +770,7 @@ fn start_conversion(
                     Err(_) if cancelled_flag.load(Ordering::SeqCst) => break,
                     Err(e) => {
                         failed.fetch_add(1, Ordering::SeqCst);
-                        let message = if e == "CONVERT_VERIFY_FAILED" {
+                        let message = if e.code == "CONVERT_VERIFY_FAILED" {
                             "convertido pero VERIFY FALLO"
                         } else {
                             "fallo la conversion"
@@ -767,6 +782,7 @@ fn start_conversion(
                             note: None,
                             original_bytes: None,
                             chd_bytes: None,
+                            log: Some(e.log).filter(|l| !l.is_empty()),
                         }
                     }
                 };
@@ -1046,7 +1062,7 @@ esac
         kill_process(pid);
 
         let result = worker.join().unwrap();
-        assert_eq!(result, Err("CONVERT_FAILED".to_string()));
+        assert_eq!(result.map_err(|e| e.code), Err("CONVERT_FAILED".to_string()));
         assert!(started.elapsed() < Duration::from_secs(20), "kill didn't stop chdman");
         assert!(
             !disc.with_extension("chd").exists(),
@@ -1064,7 +1080,10 @@ esac
 
         let result = converter::convert_disc(&mock, &disc, "cue", false, true, &pids, |_, _| {});
 
-        assert_eq!(result, Err("CONVERT_FAILED".to_string()));
+        let err = result.unwrap_err();
+        assert_eq!(err.code, "CONVERT_FAILED");
+        // chdman's own explanation is kept for "Ver detalles".
+        assert!(err.log.contains("Error: file already exists"), "{:?}", err.log);
         assert_eq!(fs::read_to_string(&existing).unwrap(), "user's own chd");
         let _ = fs::remove_dir_all(disc.parent().unwrap());
     }
@@ -1083,7 +1102,9 @@ esac
         fs::write(&corrupt, "#!/bin/sh\necho 'Error: Raw SHA1 in header = 1234' >&2\nexit 1\n").unwrap();
         fs::set_permissions(&corrupt, fs::Permissions::from_mode(0o755)).unwrap();
         wait_until_runnable(&corrupt);
-        assert_eq!(verifier::verify_chd(&corrupt, &chd, |_, _| {}), Err("VERIFY_FAILED".to_string()));
+        let err = verifier::verify_chd(&corrupt, &chd, |_, _| {}).unwrap_err();
+        assert_eq!(err.code, "VERIFY_FAILED");
+        assert!(err.log.contains("Raw SHA1 in header"), "{:?}", err.log);
 
         let _ = fs::remove_dir_all(disc.parent().unwrap());
     }

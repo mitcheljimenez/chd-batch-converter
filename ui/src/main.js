@@ -266,6 +266,26 @@ function applyTranslations() {
   extractAllBtn.textContent = t("extractAllBtn");
 }
 
+// For a failed row: a "Ver detalles" toggle that expands chdman's own
+// output for that item. `item.logOpen` keeps it open across the frequent
+// table re-renders.
+function appendLogToggle(row, item) {
+  if (!item.log) return;
+  const toggle = document.createElement("button");
+  toggle.className = "log-toggle";
+  toggle.textContent = t(item.logOpen ? "hideLog" : "showLog");
+  const pre = document.createElement("pre");
+  pre.className = "chdman-log";
+  pre.textContent = item.log;
+  pre.style.display = item.logOpen ? "block" : "none";
+  toggle.addEventListener("click", () => {
+    item.logOpen = !item.logOpen;
+    toggle.textContent = t(item.logOpen ? "hideLog" : "showLog");
+    pre.style.display = item.logOpen ? "block" : "none";
+  });
+  row.append(toggle, pre);
+}
+
 function mk(cls, text) {
   const s = document.createElement("span");
   s.className = cls;
@@ -330,6 +350,7 @@ function renderTable() {
       track.appendChild(fill);
       row.appendChild(track);
     }
+    if (disc.status === "fail") appendLogToggle(row, disc);
 
     discTable.appendChild(row);
   }
@@ -340,10 +361,11 @@ function renderTable() {
 // (the total scanned), this drops as each disc finishes so the "N files to
 // convert" label stays accurate mid-run instead of just showing the count
 // from the initial scan forever.
-// Discs still without a .chd: queued ones plus any a cancelled run never
-// finished (its partial .chd is removed, so they still need converting).
+// Discs still without a .chd: queued ones, any a cancelled run never
+// finished, and any that failed (their partial .chd is removed, so all of
+// them still need converting).
 function pendingDiscCount() {
-  return discs.filter((d) => d.status === "pending" || d.status === "cancel").length;
+  return discs.filter((d) => d.status === "pending" || d.status === "cancel" || d.status === "fail").length;
 }
 
 function updatePendingLabel() {
@@ -576,6 +598,7 @@ function renderExtractTable() {
       track.appendChild(fill);
       row.appendChild(track);
     }
+    if (chd.status === "fail") appendLogToggle(row, chd);
 
     extractTable.appendChild(row);
   }
@@ -631,11 +654,12 @@ listen("extract-item-progress", (event) => {
 });
 
 listen("extract-item-done", (event) => {
-  const { chd_path, output, error } = event.payload;
+  const { chd_path, output, error, log } = event.payload;
   const chd = matchChdByPath(chd_path);
   if (chd) {
     chd.progressPercent = undefined;
     chd.progressPhase = undefined;
+    chd.log = log ?? null;
     if (error) {
       chd.status = "fail";
       chd.error = translateError(error);
@@ -726,6 +750,7 @@ function renderVerifyTable() {
       track.appendChild(fill);
       row.appendChild(track);
     }
+    if (item.status === "fail") appendLogToggle(row, item);
     verifyTable.appendChild(row);
   }
 }
@@ -786,6 +811,7 @@ listen("verify-item-done", (event) => {
   const item = findVerifyItem(event.payload.chd_path);
   if (item) {
     item.status = event.payload.ok ? "ok" : "fail";
+    item.log = event.payload.log ?? null;
     delete item.percent;
     renderVerifyTable();
     updateVerifyProgress();
@@ -962,7 +988,7 @@ listen("disc-progress", (event) => {
 });
 
 listen("disc-updated", (event) => {
-  const { status, path, message, note, original_bytes, chd_bytes } = event.payload;
+  const { status, path, message, note, original_bytes, chd_bytes, log } = event.payload;
   const disc = matchDiscByPath(path);
   if (disc) {
     disc.status = status.toLowerCase(); // Rust enum serializes as "Ok" | "Skip" | "Fail"
@@ -974,6 +1000,7 @@ listen("disc-updated", (event) => {
     }
     if (note) parts.push(t(`note${note}`));
     disc.message = parts.join(" · ");
+    disc.log = log ?? null;
     renderTable();
     updateProgress();
     updatePendingLabel();

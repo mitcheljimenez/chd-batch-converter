@@ -1,8 +1,6 @@
-use std::io::Read;
+use crate::chdman::{self, ChdmanError};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
+use std::process::Command;
 use walkdir::WalkDir;
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
@@ -91,28 +89,28 @@ pub fn extract_chd_with_progress(
     chd_path: &Path,
     kind: &str,
     mut on_progress: impl FnMut(&str, f32),
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, ChdmanError> {
     let output = match kind {
         "cd" => {
             let cue = chd_path.with_extension("cue");
             let bin = chd_path.with_extension("bin");
             if cue.exists() {
-                return Err(format!("EXTRACT_DEST_EXISTS:{}", cue.display()));
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", cue.display())));
             }
             if bin.exists() {
-                return Err(format!("EXTRACT_DEST_EXISTS:{}", bin.display()));
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", bin.display())));
             }
-            run_with_progress(chdman_path, "extractcd", chd_path, Some(&cue), &mut on_progress)
-                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            run_chdman_on(chdman_path, "extractcd", chd_path, Some(&cue), &mut on_progress)
+                .map_err(|log| ChdmanError::new("EXTRACT_FAILED", log))?;
             cue
         }
         "dvd" => {
             let iso = chd_path.with_extension("iso");
             if iso.exists() {
-                return Err(format!("EXTRACT_DEST_EXISTS:{}", iso.display()));
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", iso.display())));
             }
-            run_with_progress(chdman_path, "extractdvd", chd_path, Some(&iso), &mut on_progress)
-                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            run_chdman_on(chdman_path, "extractdvd", chd_path, Some(&iso), &mut on_progress)
+                .map_err(|log| ChdmanError::new("EXTRACT_FAILED", log))?;
             iso
         }
         // Dreamcast GD-ROM: extractcd writes a .gdi index plus one file per
@@ -120,100 +118,37 @@ pub fn extract_chd_with_progress(
         "gd" => {
             let gdi = chd_path.with_extension("gdi");
             if gdi.exists() {
-                return Err(format!("EXTRACT_DEST_EXISTS:{}", gdi.display()));
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", gdi.display())));
             }
-            run_with_progress(chdman_path, "extractcd", chd_path, Some(&gdi), &mut on_progress)
-                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            run_chdman_on(chdman_path, "extractcd", chd_path, Some(&gdi), &mut on_progress)
+                .map_err(|log| ChdmanError::new("EXTRACT_FAILED", log))?;
             gdi
         }
-        _ => return Err("EXTRACT_UNKNOWN_FORMAT".to_string()),
+        _ => return Err(ChdmanError::without_log("EXTRACT_UNKNOWN_FORMAT")),
     };
 
-    run_with_progress(chdman_path, "verify", chd_path, None, &mut on_progress)
-        .map_err(|_| "EXTRACT_VERIFY_FAILED".to_string())?;
+    run_chdman_on(chdman_path, "verify", chd_path, None, &mut on_progress)
+        .map_err(|log| ChdmanError::new("EXTRACT_VERIFY_FAILED", log))?;
 
     Ok(output)
 }
 
-/// Runs `chdman <subcommand> -i chd_path [-o output]`, streaming its output
-/// line-by-line (splitting on chdman's bare '\r' progress-overwrite trick)
-/// and calling `on_progress(phase, percent)` for every "Extracting, X%
-/// complete..." or "Verifying, X% complete..." line it prints. chdman writes
-/// its progress lines to **stderr**, flushing on every call (per its own
-/// source: `progress()` writes to `std::cerr`) -- stdout only carries the
-/// occasional summary line, so both streams are piped and read on their own
-/// thread, feeding a shared channel this function drains on the caller's
-/// thread (since `on_progress` closes over a `tauri::Window` and isn't
-/// required to be `Send`). Returns `Err(())` on a spawn failure or non-zero
-/// exit; the caller maps that to the specific stable error code for its
-/// context (extraction vs. verify).
-pub(crate) fn run_with_progress(
+/// Runs `chdman <subcommand> -i chd_path [-o output]` (extraction or
+/// verify), reporting "Extracting/Verifying, X%" progress. Err carries
+/// chdman's log; callers attach the error code for their context.
+pub(crate) fn run_chdman_on(
     chdman_path: &Path,
     subcommand: &str,
     chd_path: &Path,
     output: Option<&Path>,
     on_progress: &mut impl FnMut(&str, f32),
-) -> Result<(), ()> {
-    let mut command = Command::new(chdman_path);
-    command.arg(subcommand).arg("-i").arg(chd_path);
+) -> Result<(), String> {
+    let mut args: Vec<std::ffi::OsString> = vec![subcommand.into(), "-i".into(), chd_path.as_os_str().to_owned()];
     if let Some(out_path) = output {
-        command.arg("-o").arg(out_path);
+        args.push("-o".into());
+        args.push(out_path.as_os_str().to_owned());
     }
-
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = crate::hide_console(&mut command)
-        .spawn()
-        .map_err(|_| ())?;
-
-    let stdout = child.stdout.take().ok_or(())?;
-    let stderr = child.stderr.take().ok_or(())?;
-
-    let (tx, rx) = mpsc::channel();
-    let tx_stderr = tx.clone();
-    let stdout_reader = thread::spawn(move || stream_phase_progress(stdout, tx));
-    let stderr_reader = thread::spawn(move || stream_phase_progress(stderr, tx_stderr));
-
-    for (phase, percent) in rx {
-        on_progress(phase, percent);
-    }
-
-    let _ = stdout_reader.join();
-    let _ = stderr_reader.join();
-
-    let status = child.wait().map_err(|_| ())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-/// Reads `reader` to EOF, parsing out "Extracting/Verifying, X% complete"
-/// lines and sending each as `(phase, percent)` through `tx`. Runs on its
-/// own thread (see `run_with_progress`) so it never has to wait its turn
-/// behind the other stream.
-fn stream_phase_progress(mut reader: impl Read, tx: mpsc::Sender<(&'static str, f32)>) {
-    let mut partial = String::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = reader.read(&mut chunk).unwrap_or(0);
-        if n == 0 {
-            break;
-        }
-        partial.push_str(&String::from_utf8_lossy(&chunk[..n]));
-        let normalized = partial.replace("\r\n", "\n").replace('\r', "\n");
-        let mut lines: Vec<&str> = normalized.split('\n').collect();
-        // The last element is whatever came after the final '\n' (possibly
-        // empty) -- an incomplete line still being written, held back for
-        // the next read.
-        let tail = lines.pop().unwrap_or("").to_string();
-        for line in lines {
-            if let Some(parsed) = parse_phase_progress(line) {
-                let _ = tx.send(parsed);
-            }
-        }
-        partial = tail;
-    }
+    chdman::run(chdman_path, &args, None, parse_phase_progress, on_progress)
 }
 
 /// Parses chdman's own progress output for extraction/verification, e.g.
@@ -408,7 +343,7 @@ mod extract_chd_tests {
 
         let result = extract_chd_with_progress(&bogus_chdman, &chd, "unknown", |_, _| {});
 
-        assert_eq!(result, Err("EXTRACT_UNKNOWN_FORMAT".to_string()));
+        assert_eq!(result.map_err(|e| e.code), Err("EXTRACT_UNKNOWN_FORMAT".to_string()));
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -422,7 +357,7 @@ mod extract_chd_tests {
 
         let result = extract_chd_with_progress(&bogus_chdman, &chd, "cd", |_, _| {});
 
-        assert!(matches!(result, Err(ref msg) if msg.starts_with("EXTRACT_DEST_EXISTS:")));
+        assert!(matches!(result, Err(ref e) if e.code.starts_with("EXTRACT_DEST_EXISTS:")));
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -436,7 +371,7 @@ mod extract_chd_tests {
 
         let result = extract_chd_with_progress(&bogus_chdman, &chd, "dvd", |_, _| {});
 
-        assert!(matches!(result, Err(ref msg) if msg.starts_with("EXTRACT_DEST_EXISTS:")));
+        assert!(matches!(result, Err(ref e) if e.code.starts_with("EXTRACT_DEST_EXISTS:")));
         fs::remove_dir_all(&dir).unwrap();
     }
 }

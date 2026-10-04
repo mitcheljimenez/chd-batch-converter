@@ -1,9 +1,6 @@
-use std::io::Read;
+use crate::chdman::{self, ChdmanError};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 /// Whether `kind` ("cue" or "iso") should be converted with `createcd`
 /// instead of the format its extension would normally imply. A `.cue` is
@@ -79,7 +76,7 @@ pub fn convert_disc(
     parallel: bool,
     active_pids: &Arc<Mutex<Vec<u32>>>,
     mut on_progress: impl FnMut(&str, f32),
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, ChdmanError> {
     let out = disc_path.with_extension("chd");
     // `verify` has no `-np` equivalent (it isn't in verify's own option
     // list per chdman's docs), so the thread-oversubscription guard below
@@ -92,97 +89,18 @@ pub fn convert_disc(
     // we started (chdman refuses to overwrite an existing output, so in that
     // case the file isn't ours to delete).
     let preexisting = out.exists();
-    if run_with_progress(chdman_path, &convert_args, active_pids, &mut on_progress).is_err() {
+    if let Err(log) = chdman::run(chdman_path, &convert_args, Some(active_pids), parse_convert_progress, &mut on_progress) {
         if !preexisting {
             let _ = std::fs::remove_file(&out);
         }
-        return Err("CONVERT_FAILED".to_string());
+        return Err(ChdmanError::new("CONVERT_FAILED", log));
     }
 
     let verify_args: Vec<std::ffi::OsString> = vec!["verify".into(), "-i".into(), out.as_os_str().to_owned()];
-    run_with_progress(chdman_path, &verify_args, active_pids, &mut on_progress)
-        .map_err(|_| "CONVERT_VERIFY_FAILED".to_string())?;
+    chdman::run(chdman_path, &verify_args, Some(active_pids), parse_convert_progress, &mut on_progress)
+        .map_err(|log| ChdmanError::new("CONVERT_VERIFY_FAILED", log))?;
 
     Ok(out)
-}
-
-/// Runs `chdman` with `args`, streaming its output line-by-line (splitting
-/// on chdman's bare '\r' progress-overwrite trick) and calling
-/// `on_progress(phase, percent)` for every "Compressing, X%
-/// complete..."/"Verifying, X% complete..." line. chdman writes its progress
-/// lines to **stderr** (confirmed in its own source: `progress()` writes to
-/// `std::cerr` and flushes on every call) -- stdout carries only the
-/// occasional summary line. Both streams are piped and read from their own
-/// thread so a slow/quiet stdout never blocks stderr's progress lines (or
-/// vice versa); the two threads feed a shared channel that this function
-/// drains on the caller's thread, since `on_progress` closes over a
-/// `tauri::Window` and isn't required to be `Send`.
-///
-/// Registers the spawned PID in `active_pids` for the run's duration so
-/// `cancel_conversion` can reach it.
-fn run_with_progress(
-    chdman_path: &Path,
-    args: &[std::ffi::OsString],
-    active_pids: &Arc<Mutex<Vec<u32>>>,
-    on_progress: &mut impl FnMut(&str, f32),
-) -> Result<(), ()> {
-    let mut command = Command::new(chdman_path);
-    command.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = crate::hide_console(&mut command)
-        .spawn()
-        .map_err(|_| ())?;
-
-    let pid = child.id();
-    active_pids.lock().unwrap().push(pid);
-
-    let stdout = child.stdout.take().ok_or(())?;
-    let stderr = child.stderr.take().ok_or(())?;
-
-    let (tx, rx) = mpsc::channel();
-    let tx_stderr = tx.clone();
-    let stdout_reader = thread::spawn(move || stream_progress(stdout, tx));
-    let stderr_reader = thread::spawn(move || stream_progress(stderr, tx_stderr));
-
-    for (phase, percent) in rx {
-        on_progress(phase, percent);
-    }
-
-    let _ = stdout_reader.join();
-    let _ = stderr_reader.join();
-
-    let status = child.wait().map_err(|_| ())?;
-    active_pids.lock().unwrap().retain(|&p| p != pid);
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-/// Reads `reader` to EOF, parsing out "Compressing/Verifying, X% complete"
-/// lines and sending each as `(phase, percent)` through `tx`. Runs on its
-/// own thread (see `run_with_progress`) so it never has to wait its turn
-/// behind the other stream.
-fn stream_progress(mut reader: impl Read, tx: mpsc::Sender<(&'static str, f32)>) {
-    let mut partial = String::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = reader.read(&mut chunk).unwrap_or(0);
-        if n == 0 {
-            break;
-        }
-        partial.push_str(&String::from_utf8_lossy(&chunk[..n]));
-        let normalized = partial.replace("\r\n", "\n").replace('\r', "\n");
-        let mut lines: Vec<&str> = normalized.split('\n').collect();
-        let tail = lines.pop().unwrap_or("").to_string();
-        for line in lines {
-            if let Some(parsed) = parse_convert_progress(line) {
-                let _ = tx.send(parsed);
-            }
-        }
-        partial = tail;
-    }
 }
 
 /// Parses chdman's own progress output for conversion, e.g. "Compressing,

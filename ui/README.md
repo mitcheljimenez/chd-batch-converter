@@ -103,6 +103,9 @@ You only need to do this once; later auto-updates open normally.
    (-36 %)`), and the run ends with the total space saved, which is also
    kept in "Historial". If you're in another app when a conversion or
    extraction finishes, a system notification tells you how it went.
+   If a disc fails, click "Ver detalles" on its row to see exactly what
+   `chdman` reported (the same works in "Extraer .chd" and
+   "Verificar .chd").
 6. Check "Historial" any time for past runs.
 7. Need to undo a conversion (e.g. to recover a `.chd` made unreadable on
    Android by an old version of this app)? See [Extraer .chd](#extraer-chd)

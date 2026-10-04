@@ -88,6 +88,8 @@ const translations = {
     flattenFailed: (err) => `No se pudo aplanar: ${err}`,
     navExtract: "Extraer .chd",
     navVerify: "Verificar .chd",
+    showLog: "Ver detalles",
+    hideLog: "Ocultar detalles",
     verifyExplanation:
       "Comprueba que tus .chd sigan intactos: chdman relee cada archivo y lo compara con la huella guardada dentro. Útil tras copiarlos a otro disco, a una tarjeta SD o a la consola. No modifica nada.",
     verifyAllBtn: "Verificar todos",
@@ -234,6 +236,8 @@ const translations = {
     flattenFailed: (err) => `Could not flatten: ${err}`,
     navExtract: "Extract .chd",
     navVerify: "Verify .chd",
+    showLog: "Show details",
+    hideLog: "Hide details",
     verifyExplanation:
       "Checks that your .chd files are still intact: chdman re-reads each one and compares it with the fingerprint stored inside. Useful after copying them to another drive, an SD card or a console. Changes nothing.",
     verifyAllBtn: "Verify all",

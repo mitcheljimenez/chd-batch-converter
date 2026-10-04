@@ -61,11 +61,7 @@ where effort would likely pay off most:
 2. **More languages** if there's demand — the Settings selector already
    supports adding a language as a self-contained dictionary in
    `ui/src/i18n.js`, so this is mostly translation work, not plumbing.
-3. **A conversion log viewer in the app** — right now a failure only
-   shows a short message; being able to expand it to the full
-   `conversion_log.txt` for that game would help diagnosing chdman
-   errors without leaving the app.
-4. **Config profiles** for people who juggle more than one ROMs
+3. **Config profiles** for people who juggle more than one ROMs
    directory or chdman path (e.g. separate PC and handheld libraries).
 
 Done: **parallel conversion** in the desktop app — see [`ui/README.md`](ui/README.md)
@@ -77,6 +73,10 @@ Done: **Linux and macOS builds of the desktop app** — see
 
 Done: **a "verify only" pass** — "Verificar .chd" in the desktop app
 re-runs `chdman verify` over existing `.chd` files.
+
+Done: **chdman's output on failures** — a failed conversion, extraction
+or verification has a "Ver detalles" link that expands what chdman
+printed.
 
 Done: **CI tests on every push** (`cargo test` on Windows, Linux and
 macOS — `.github/workflows/ci.yml`).

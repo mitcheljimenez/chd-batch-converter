@@ -37,9 +37,13 @@ pub fn scan_all_chds(root: &Path) -> Vec<ScannedChdFile> {
 /// it against the SHA-1 stored in the file -- the way to catch a copy that
 /// got corrupted after it was made (a bad transfer, a failing drive or SD
 /// card). Streams "Verifying, X%" through `on_progress`.
-pub fn verify_chd(chdman_path: &Path, chd_path: &Path, mut on_progress: impl FnMut(&str, f32)) -> Result<(), String> {
-    crate::extractor::run_with_progress(chdman_path, "verify", chd_path, None, &mut on_progress)
-        .map_err(|_| "VERIFY_FAILED".to_string())
+pub fn verify_chd(
+    chdman_path: &Path,
+    chd_path: &Path,
+    mut on_progress: impl FnMut(&str, f32),
+) -> Result<(), crate::chdman::ChdmanError> {
+    crate::extractor::run_chdman_on(chdman_path, "verify", chd_path, None, &mut on_progress)
+        .map_err(|log| crate::chdman::ChdmanError::new("VERIFY_FAILED", log))
 }
 
 #[cfg(test)]
