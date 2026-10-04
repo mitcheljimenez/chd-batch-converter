@@ -64,6 +64,7 @@ pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
 fn already_extracted(chd_path: &Path, kind: &str) -> bool {
     match kind {
         "dvd" => chd_path.with_extension("iso").exists(),
+        "gd" => chd_path.with_extension("gdi").exists(),
         "cd" => chd_path.with_extension("cue").exists() || chd_path.with_extension("bin").exists(),
         _ => false,
     }
@@ -113,6 +114,17 @@ pub fn extract_chd_with_progress(
             run_with_progress(chdman_path, "extractdvd", chd_path, Some(&iso), &mut on_progress)
                 .map_err(|_| "EXTRACT_FAILED".to_string())?;
             iso
+        }
+        // Dreamcast GD-ROM: extractcd writes a .gdi index plus one file per
+        // track (<stem>01.bin, <stem>02.raw, ...) when the output is a .gdi.
+        "gd" => {
+            let gdi = chd_path.with_extension("gdi");
+            if gdi.exists() {
+                return Err(format!("EXTRACT_DEST_EXISTS:{}", gdi.display()));
+            }
+            run_with_progress(chdman_path, "extractcd", chd_path, Some(&gdi), &mut on_progress)
+                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            gdi
         }
         _ => return Err("EXTRACT_UNKNOWN_FORMAT".to_string()),
     };
@@ -228,7 +240,10 @@ fn parse_phase_progress(line: &str) -> Option<(&'static str, f32)> {
 /// don't validate that the input CHD matches, and silently write garbage
 /// output if run against the wrong kind.
 pub fn classify_chd_info(info_output: &str) -> &'static str {
-    if info_output.contains("Tag='CHT2'") || info_output.contains("Tag='CHTR'") {
+    if info_output.contains("Tag='CHGD'") {
+        // Dreamcast GD-ROM (written by createcd from a .gdi).
+        "gd"
+    } else if info_output.contains("Tag='CHT2'") || info_output.contains("Tag='CHTR'") {
         "cd"
     } else if info_output.contains("Tag='DVD '") {
         "dvd"
@@ -248,6 +263,16 @@ mod already_extracted_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn gd_is_already_extracted_when_a_sibling_gdi_exists() {
+        let dir = temp_dir("gd_gdi_exists");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+        assert!(!already_extracted(&chd, "gd"));
+        fs::write(dir.join("Game.gdi"), b"3").unwrap();
+        assert!(already_extracted(&chd, "gd"));
     }
 
     #[test]
@@ -318,6 +343,15 @@ mod already_extracted_tests {
 #[cfg(test)]
 mod classify_tests {
     use super::classify_chd_info;
+
+    // From `chdman info` (0.264) against a CHD made by `createcd` from a
+    // Dreamcast .gdi: GD-ROM tracks are tagged CHGD, not CHT2.
+    const GD_INFO: &str = "Metadata:     Tag='CHGD'  Index=0  Length=98 bytes\n              TRACK:1 TYPE:MODE1_RAW SUBTYPE:NONE FRAMES:600 PAD:0 PREGAP:0 PGTYPE:MODE1 PGSUB:RW\n";
+
+    #[test]
+    fn dreamcast_gd_rom_metadata_is_classified_as_gd() {
+        assert_eq!(classify_chd_info(GD_INFO), "gd");
+    }
 
     // Captured verbatim from `chdman info` (0.289) against a real CD-type
     // CHD produced by `createcd`.

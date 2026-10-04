@@ -31,7 +31,8 @@ generated file.
 ## Desktop app
 
 If you'd rather not use the command line, there's a desktop app with a
-graphical interface (Windows, Linux and macOS) in [`ui/`](ui/), with folder selection, live
+graphical interface (Windows, Linux and macOS) in [`ui/`](ui/) that also
+handles Dreamcast (`.gdi`) dumps, with folder selection, live
 progress, conversion history, automatic updates, **parallel conversion**
 (several `chdman` processes run at once, one per CPU core, instead of
 converting discs one at a time), an ES-DE multi-disc

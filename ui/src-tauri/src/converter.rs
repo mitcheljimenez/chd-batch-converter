@@ -14,7 +14,8 @@ use std::thread;
 /// `FORMAT_OVERRIDES` handling, kept here as its own pure function so it's
 /// testable without spawning chdman.
 fn should_use_cd(kind: &str, force_cd: bool) -> bool {
-    kind == "cue" || force_cd
+    // createcd also takes a Dreamcast .gdi directly (stored as GD-ROM).
+    kind == "cue" || kind == "gdi" || force_cd
 }
 
 /// Builds the `createcd`/`createdvd` argument list for converting
@@ -256,6 +257,12 @@ mod build_convert_args_tests {
             let args = args_as_strings(&build_convert_args(kind, false, false, Path::new("Game.x"), Path::new("Game.chd")));
             assert!(!args.iter().any(|a| a == "-np"), "{:?}", args);
         }
+    }
+
+    #[test]
+    fn a_dreamcast_gdi_uses_createcd() {
+        let args = args_as_strings(&build_convert_args("gdi", false, true, Path::new("Game.gdi"), Path::new("Game.chd")));
+        assert_eq!(args[0], "createcd");
     }
 
     #[test]

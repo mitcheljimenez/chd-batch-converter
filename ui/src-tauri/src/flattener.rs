@@ -23,11 +23,32 @@ fn is_multidisc_folder(name: &str) -> bool {
 /// cleanup pass below so both agree on what's off-limits.
 fn skip_multidisc_dirs(entry: &walkdir::DirEntry) -> bool {
     !entry.file_type().is_dir()
-        || !entry
+        || !(entry
             .file_name()
             .to_str()
             .map(is_multidisc_folder)
             .unwrap_or(false)
+            || holds_gdi(entry.path()))
+}
+
+/// A Dreamcast .gdi dump is a .gdi index plus track files that nearly
+/// always share generic names (track01.bin, track02.raw, ...) across every
+/// game. Flattening two of them would collide, rename tracks to
+/// "track01 (2).bin", and leave each .gdi pointing at the wrong (or a
+/// missing) file -- so a folder holding a .gdi is left alone, like a
+/// multi-disc folder. (Once converted, the single .chd can be moved out
+/// with "Mover .chd".)
+fn holds_gdi(dir: &Path) -> bool {
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries.filter_map(|e| e.ok()).any(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext.eq_ignore_ascii_case("gdi"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Resolves a non-colliding path for `file_name` directly under
@@ -253,5 +274,26 @@ mod tests {
         assert!(multidisc.join("Game (Disc 1).chd").exists());
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn leaves_dreamcast_gdi_folders_intact() {
+        let root = temp_dir("gdi_intact");
+        for game in ["Sonic", "Crazy Taxi"] {
+            fs::create_dir_all(root.join(game)).unwrap();
+            fs::write(root.join(game).join(format!("{game}.gdi")), "3").unwrap();
+            fs::write(root.join(game).join("track01.bin"), "t1").unwrap();
+            fs::write(root.join(game).join("track02.raw"), "t2").unwrap();
+        }
+        fs::create_dir_all(root.join("Other")).unwrap();
+        fs::write(root.join("Other/Other.chd"), "chd").unwrap();
+
+        let summary = flatten_folders(&root).unwrap();
+
+        assert_eq!(summary.files_moved, 1);
+        assert_eq!(summary.renamed_due_to_collision, 0);
+        assert!(root.join("Other.chd").exists());
+        assert!(root.join("Sonic/track01.bin").exists());
+        assert!(root.join("Crazy Taxi/track01.bin").exists());
     }
 }

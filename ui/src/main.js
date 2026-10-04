@@ -486,7 +486,7 @@ function renderExtractTable() {
   for (const chd of chds) {
     const row = document.createElement("div");
     row.className = "disc-row";
-    const kindLabel = { cd: t("extractKindCd"), dvd: t("extractKindDvd"), unknown: t("extractKindUnknown") }[chd.kind];
+    const kindLabel = { cd: t("extractKindCd"), dvd: t("extractKindDvd"), gd: t("extractKindGd"), unknown: t("extractKindUnknown") }[chd.kind];
     const icon = { pending: "•", ok: "✅", fail: "❌" }[chd.status];
     const main = document.createElement("div");
     main.className = "disc-row-main";

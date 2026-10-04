@@ -809,6 +809,20 @@ case "$cmd" in
 esac
 "#;
 
+    /// Writing an executable while another test thread is spawning a
+    /// process races on Linux: the forked child briefly inherits our
+    /// still-open write handle, and exec'ing the script during that window
+    /// fails with ETXTBSY ("Text file busy"). Probe-run it until it starts.
+    fn wait_until_runnable(script: &Path) {
+        for _ in 0..200 {
+            match std::process::Command::new(script).output() {
+                Err(e) if e.raw_os_error() == Some(26) => thread::sleep(Duration::from_millis(10)),
+                _ => return,
+            }
+        }
+        panic!("{} stayed busy", script.display());
+    }
+
     fn setup(name: &str) -> (PathBuf, PathBuf) {
         let work = std::env::temp_dir().join(name);
         let _ = fs::remove_dir_all(&work);
@@ -816,6 +830,7 @@ esac
         let mock = work.join("chdman");
         fs::write(&mock, MOCK_CHDMAN).unwrap();
         fs::set_permissions(&mock, fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_runnable(&mock);
         let disc = work.join("Game.cue");
         fs::write(&disc, "FILE \"Game.bin\" BINARY\n").unwrap();
         (mock, disc)
@@ -849,6 +864,7 @@ esac
         let hanging = mock.with_file_name("chdman-hang");
         fs::write(&hanging, format!("#!/bin/sh\nMOCK_CHDMAN_HANG=1 exec \"{}\" \"$@\"\n", mock.display())).unwrap();
         fs::set_permissions(&hanging, fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_runnable(&hanging);
 
         let pids = Arc::new(Mutex::new(Vec::new()));
         let worker_pids = Arc::clone(&pids);

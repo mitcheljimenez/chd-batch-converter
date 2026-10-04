@@ -11,6 +11,8 @@ pub struct ScannedDisc {
 pub fn scan_folder(root: &Path) -> Vec<ScannedDisc> {
     let mut cues: Vec<PathBuf> = Vec::new();
     let mut isos: Vec<PathBuf> = Vec::new();
+    // Dreamcast GD-ROM dumps: a .gdi index plus its track files.
+    let mut gdis: Vec<PathBuf> = Vec::new();
 
     for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
@@ -20,6 +22,7 @@ pub fn scan_folder(root: &Path) -> Vec<ScannedDisc> {
         match path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) {
             Some(ext) if ext == "cue" => cues.push(path),
             Some(ext) if ext == "iso" => isos.push(path),
+            Some(ext) if ext == "gdi" => gdis.push(path),
             _ => {}
         }
     }
@@ -52,6 +55,14 @@ pub fn scan_folder(root: &Path) -> Vec<ScannedDisc> {
                 kind: "iso".to_string(),
             });
         }
+    }
+
+    for gdi in gdis.iter().filter(|p| !already_converted(p)) {
+        results.push(ScannedDisc {
+            name: gdi.file_name().unwrap().to_string_lossy().to_string(),
+            folder: gdi.parent().unwrap().to_string_lossy().to_string(),
+            kind: "gdi".to_string(),
+        });
     }
 
     results
@@ -144,5 +155,21 @@ mod tests {
         assert_eq!(scan_folder(&dir), Vec::new());
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finds_dreamcast_gdi_unless_already_converted() {
+        let dir = std::env::temp_dir().join(format!("chd_scanner_gdi_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        write(&dir.join("Sonic/Sonic.gdi"), "3\n1 0 4 2352 track01.bin 0\n");
+        write(&dir.join("Done/Done.gdi"), "3\n1 0 4 2352 track01.bin 0\n");
+        write(&dir.join("Done/Done.chd"), "chd");
+
+        let results = scan_folder(&dir);
+        assert_eq!(results.len(), 1, "{:?}", results);
+        assert_eq!(results[0].name, "Sonic.gdi");
+        assert_eq!(results[0].kind, "gdi");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

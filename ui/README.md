@@ -78,6 +78,11 @@ You only need to do this once; later auto-updates open normally.
    (NetherSX2/AetherSX2). Each `.iso` row also has a "DVD (zlib)"/"CD"
    dropdown if you want to force CD format for a specific game instead —
    you shouldn't normally need to, but it's there as an escape hatch.
+   Dreamcast dumps (`.gdi` plus its tracks) are converted too, with
+   `chdman createcd`, and "Extraer .chd" turns a Dreamcast `.chd` back
+   into a `.gdi` with its tracks. "Aplanar carpetas" leaves folders that
+   hold a `.gdi` untouched, since Dreamcast tracks usually share generic
+   names (`track01.bin`, ...) that would collide.
    Conversion runs **in parallel** by default: one `chdman` process per
    CPU core converts at once, instead of one disc at a time, so a large
    library finishes noticeably faster on a multi-core machine. Prefer one
