@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "targets": [
+      "appimage",
+      "deb"
+    ],
+    "linux": {
+      "deb": {
+        "recommends": [
+          "mame-tools"
+        ]
+      }
+    }
+  }
+}

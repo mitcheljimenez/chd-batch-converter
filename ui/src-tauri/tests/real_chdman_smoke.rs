@@ -1,3 +1,6 @@
+// Exercises the legacy convertir_a_chd.bat, so it only runs on Windows.
+#![cfg(windows)]
+
 // Proves the full spawn+tail+chdman pipeline works against the REAL chdman.exe,
 // not just the mock used by Task 6's smoke test and the .bat's own regression suite.
 use std::process::{Command, Stdio};

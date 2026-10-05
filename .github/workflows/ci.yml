@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        working-directory: ui/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # The Windows-only integration tests drive the real chdman.exe at the
+      # repo root, which isn't checked in; build-assets/ has a copy.
+      - name: Provide chdman.exe for the Windows integration tests
+        if: matrix.platform == 'windows-latest'
+        run: Copy-Item build-assets/chdman.exe ../../chdman.exe
+        shell: pwsh
+
+      - run: cargo test

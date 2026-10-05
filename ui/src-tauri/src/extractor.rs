@@ -1,9 +1,6 @@
-use std::io::Read;
-use std::os::windows::process::CommandExt;
+use crate::chdman::{self, ChdmanError};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
+use std::process::Command;
 use walkdir::WalkDir;
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
@@ -41,10 +38,7 @@ pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
         if !is_chd {
             continue;
         }
-        let kind = Command::new(chdman_path)
-            .args(["info", "-i"])
-            .arg(path)
-            .creation_flags(crate::CREATE_NO_WINDOW)
+        let kind = crate::hide_console(Command::new(chdman_path).args(["info", "-i"]).arg(path))
             .output()
             .map(|out| classify_chd_info(&String::from_utf8_lossy(&out.stdout)).to_string())
             .unwrap_or_else(|_| "unknown".to_string());
@@ -68,6 +62,7 @@ pub fn scan_chds(root: &Path, chdman_path: &Path) -> Vec<ScannedChd> {
 fn already_extracted(chd_path: &Path, kind: &str) -> bool {
     match kind {
         "dvd" => chd_path.with_extension("iso").exists(),
+        "gd" => chd_path.with_extension("gdi").exists(),
         "cd" => chd_path.with_extension("cue").exists() || chd_path.with_extension("bin").exists(),
         _ => false,
     }
@@ -94,120 +89,66 @@ pub fn extract_chd_with_progress(
     chd_path: &Path,
     kind: &str,
     mut on_progress: impl FnMut(&str, f32),
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, ChdmanError> {
     let output = match kind {
         "cd" => {
             let cue = chd_path.with_extension("cue");
             let bin = chd_path.with_extension("bin");
             if cue.exists() {
-                return Err(format!("EXTRACT_DEST_EXISTS:{}", cue.display()));
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", cue.display())));
             }
             if bin.exists() {
-                return Err(format!("EXTRACT_DEST_EXISTS:{}", bin.display()));
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", bin.display())));
             }
-            run_with_progress(chdman_path, "extractcd", chd_path, Some(&cue), &mut on_progress)
-                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            run_chdman_on(chdman_path, "extractcd", chd_path, Some(&cue), &mut on_progress)
+                .map_err(|log| ChdmanError::new("EXTRACT_FAILED", log))?;
             cue
         }
         "dvd" => {
             let iso = chd_path.with_extension("iso");
             if iso.exists() {
-                return Err(format!("EXTRACT_DEST_EXISTS:{}", iso.display()));
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", iso.display())));
             }
-            run_with_progress(chdman_path, "extractdvd", chd_path, Some(&iso), &mut on_progress)
-                .map_err(|_| "EXTRACT_FAILED".to_string())?;
+            run_chdman_on(chdman_path, "extractdvd", chd_path, Some(&iso), &mut on_progress)
+                .map_err(|log| ChdmanError::new("EXTRACT_FAILED", log))?;
             iso
         }
-        _ => return Err("EXTRACT_UNKNOWN_FORMAT".to_string()),
+        // Dreamcast GD-ROM: extractcd writes a .gdi index plus one file per
+        // track (<stem>01.bin, <stem>02.raw, ...) when the output is a .gdi.
+        "gd" => {
+            let gdi = chd_path.with_extension("gdi");
+            if gdi.exists() {
+                return Err(ChdmanError::without_log(format!("EXTRACT_DEST_EXISTS:{}", gdi.display())));
+            }
+            run_chdman_on(chdman_path, "extractcd", chd_path, Some(&gdi), &mut on_progress)
+                .map_err(|log| ChdmanError::new("EXTRACT_FAILED", log))?;
+            gdi
+        }
+        _ => return Err(ChdmanError::without_log("EXTRACT_UNKNOWN_FORMAT")),
     };
 
-    run_with_progress(chdman_path, "verify", chd_path, None, &mut on_progress)
-        .map_err(|_| "EXTRACT_VERIFY_FAILED".to_string())?;
+    run_chdman_on(chdman_path, "verify", chd_path, None, &mut on_progress)
+        .map_err(|log| ChdmanError::new("EXTRACT_VERIFY_FAILED", log))?;
 
     Ok(output)
 }
 
-/// Runs `chdman <subcommand> -i chd_path [-o output]`, streaming its output
-/// line-by-line (splitting on chdman's bare '\r' progress-overwrite trick)
-/// and calling `on_progress(phase, percent)` for every "Extracting, X%
-/// complete..." or "Verifying, X% complete..." line it prints. chdman writes
-/// its progress lines to **stderr**, flushing on every call (per its own
-/// source: `progress()` writes to `std::cerr`) -- stdout only carries the
-/// occasional summary line, so both streams are piped and read on their own
-/// thread, feeding a shared channel this function drains on the caller's
-/// thread (since `on_progress` closes over a `tauri::Window` and isn't
-/// required to be `Send`). Returns `Err(())` on a spawn failure or non-zero
-/// exit; the caller maps that to the specific stable error code for its
-/// context (extraction vs. verify).
-fn run_with_progress(
+/// Runs `chdman <subcommand> -i chd_path [-o output]` (extraction or
+/// verify), reporting "Extracting/Verifying, X%" progress. Err carries
+/// chdman's log; callers attach the error code for their context.
+pub(crate) fn run_chdman_on(
     chdman_path: &Path,
     subcommand: &str,
     chd_path: &Path,
     output: Option<&Path>,
     on_progress: &mut impl FnMut(&str, f32),
-) -> Result<(), ()> {
-    let mut command = Command::new(chdman_path);
-    command.arg(subcommand).arg("-i").arg(chd_path);
+) -> Result<(), String> {
+    let mut args: Vec<std::ffi::OsString> = vec![subcommand.into(), "-i".into(), chd_path.as_os_str().to_owned()];
     if let Some(out_path) = output {
-        command.arg("-o").arg(out_path);
+        args.push("-o".into());
+        args.push(out_path.as_os_str().to_owned());
     }
-
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(crate::CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|_| ())?;
-
-    let stdout = child.stdout.take().ok_or(())?;
-    let stderr = child.stderr.take().ok_or(())?;
-
-    let (tx, rx) = mpsc::channel();
-    let tx_stderr = tx.clone();
-    let stdout_reader = thread::spawn(move || stream_phase_progress(stdout, tx));
-    let stderr_reader = thread::spawn(move || stream_phase_progress(stderr, tx_stderr));
-
-    for (phase, percent) in rx {
-        on_progress(phase, percent);
-    }
-
-    let _ = stdout_reader.join();
-    let _ = stderr_reader.join();
-
-    let status = child.wait().map_err(|_| ())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-/// Reads `reader` to EOF, parsing out "Extracting/Verifying, X% complete"
-/// lines and sending each as `(phase, percent)` through `tx`. Runs on its
-/// own thread (see `run_with_progress`) so it never has to wait its turn
-/// behind the other stream.
-fn stream_phase_progress(mut reader: impl Read, tx: mpsc::Sender<(&'static str, f32)>) {
-    let mut partial = String::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = reader.read(&mut chunk).unwrap_or(0);
-        if n == 0 {
-            break;
-        }
-        partial.push_str(&String::from_utf8_lossy(&chunk[..n]));
-        let normalized = partial.replace("\r\n", "\n").replace('\r', "\n");
-        let mut lines: Vec<&str> = normalized.split('\n').collect();
-        // The last element is whatever came after the final '\n' (possibly
-        // empty) -- an incomplete line still being written, held back for
-        // the next read.
-        let tail = lines.pop().unwrap_or("").to_string();
-        for line in lines {
-            if let Some(parsed) = parse_phase_progress(line) {
-                let _ = tx.send(parsed);
-            }
-        }
-        partial = tail;
-    }
+    chdman::run(chdman_path, &args, None, parse_phase_progress, on_progress)
 }
 
 /// Parses chdman's own progress output for extraction/verification, e.g.
@@ -234,7 +175,10 @@ fn parse_phase_progress(line: &str) -> Option<(&'static str, f32)> {
 /// don't validate that the input CHD matches, and silently write garbage
 /// output if run against the wrong kind.
 pub fn classify_chd_info(info_output: &str) -> &'static str {
-    if info_output.contains("Tag='CHT2'") || info_output.contains("Tag='CHTR'") {
+    if info_output.contains("Tag='CHGD'") {
+        // Dreamcast GD-ROM (written by createcd from a .gdi).
+        "gd"
+    } else if info_output.contains("Tag='CHT2'") || info_output.contains("Tag='CHTR'") {
         "cd"
     } else if info_output.contains("Tag='DVD '") {
         "dvd"
@@ -254,6 +198,16 @@ mod already_extracted_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn gd_is_already_extracted_when_a_sibling_gdi_exists() {
+        let dir = temp_dir("gd_gdi_exists");
+        let chd = dir.join("Game.chd");
+        fs::write(&chd, b"fake").unwrap();
+        assert!(!already_extracted(&chd, "gd"));
+        fs::write(dir.join("Game.gdi"), b"3").unwrap();
+        assert!(already_extracted(&chd, "gd"));
     }
 
     #[test]
@@ -325,6 +279,15 @@ mod already_extracted_tests {
 mod classify_tests {
     use super::classify_chd_info;
 
+    // From `chdman info` (0.264) against a CHD made by `createcd` from a
+    // Dreamcast .gdi: GD-ROM tracks are tagged CHGD, not CHT2.
+    const GD_INFO: &str = "Metadata:     Tag='CHGD'  Index=0  Length=98 bytes\n              TRACK:1 TYPE:MODE1_RAW SUBTYPE:NONE FRAMES:600 PAD:0 PREGAP:0 PGTYPE:MODE1 PGSUB:RW\n";
+
+    #[test]
+    fn dreamcast_gd_rom_metadata_is_classified_as_gd() {
+        assert_eq!(classify_chd_info(GD_INFO), "gd");
+    }
+
     // Captured verbatim from `chdman info` (0.289) against a real CD-type
     // CHD produced by `createcd`.
     const CD_INFO: &str = "chdman - MAME Compressed Hunks of Data (CHD) manager 0.289 (mame0289)\nInput file:   test_cd.chd\nFile Version: 5\nLogical size: 244,800 bytes\nHunk Size:    19,584 bytes\nTotal Hunks:  13\nUnit Size:    2,448 bytes\nTotal Units:  100\nCompression:  cdlz (CD LZMA), cdzl (CD Deflate), cdfl (CD FLAC)\nCHD size:     293 bytes\nRatio:        0.1%\nSHA1:         1135febcf39f68f8ee90df246c0bb0f31517f53c\nData SHA1:    0288a92a2ce4f642d981dbe146a897dc31e659ac\nMetadata:     Tag='CHT2'  Index=0  Length=86 bytes\n              TRACK:1 TYPE:MODE1 SUBTYPE:NONE FRAMES:100 PREGAP:0 PGTYPE:M\n";
@@ -380,7 +343,7 @@ mod extract_chd_tests {
 
         let result = extract_chd_with_progress(&bogus_chdman, &chd, "unknown", |_, _| {});
 
-        assert_eq!(result, Err("EXTRACT_UNKNOWN_FORMAT".to_string()));
+        assert_eq!(result.map_err(|e| e.code), Err("EXTRACT_UNKNOWN_FORMAT".to_string()));
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -394,7 +357,7 @@ mod extract_chd_tests {
 
         let result = extract_chd_with_progress(&bogus_chdman, &chd, "cd", |_, _| {});
 
-        assert!(matches!(result, Err(ref msg) if msg.starts_with("EXTRACT_DEST_EXISTS:")));
+        assert!(matches!(result, Err(ref e) if e.code.starts_with("EXTRACT_DEST_EXISTS:")));
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -408,7 +371,7 @@ mod extract_chd_tests {
 
         let result = extract_chd_with_progress(&bogus_chdman, &chd, "dvd", |_, _| {});
 
-        assert!(matches!(result, Err(ref msg) if msg.starts_with("EXTRACT_DEST_EXISTS:")));
+        assert!(matches!(result, Err(ref e) if e.code.starts_with("EXTRACT_DEST_EXISTS:")));
         fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -1,10 +1,6 @@
-use std::io::Read;
-use std::os::windows::process::CommandExt;
+use crate::chdman::{self, ChdmanError};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 /// Whether `kind` ("cue" or "iso") should be converted with `createcd`
 /// instead of the format its extension would normally imply. A `.cue` is
@@ -15,18 +11,25 @@ use std::thread;
 /// `FORMAT_OVERRIDES` handling, kept here as its own pure function so it's
 /// testable without spawning chdman.
 fn should_use_cd(kind: &str, force_cd: bool) -> bool {
-    kind == "cue" || force_cd
+    // createcd also takes a Dreamcast .gdi directly (stored as GD-ROM).
+    kind == "cue" || kind == "gdi" || force_cd
 }
 
 /// Builds the `createcd`/`createdvd` argument list for converting
-/// `disc_path` to `out`. Always pins `-np 1` (one compression thread) --
-/// see the doc comment on the `-np` push site in `convert_disc` for why:
-/// this crate's own parallelism is one chdman process per core, so letting
-/// each process ALSO spin up its own per-core thread pool would
-/// oversubscribe the CPU by roughly (cores squared) instead of just using
-/// it. Kept as its own pure function so the presence of `-np 1` is
-/// verifiable without spawning chdman.
-fn build_convert_args(kind: &str, force_cd: bool, disc_path: &Path, out: &Path) -> Vec<std::ffi::OsString> {
+/// `disc_path` to `out`. When `parallel` (one chdman process per core, see
+/// `worker_count`), pins `-np 1` (one compression thread): letting each
+/// process ALSO spin up its own per-core thread pool would oversubscribe
+/// the CPU by roughly (cores squared) instead of just using it. When
+/// converting one disc at a time, `-np` is left out so that single chdman
+/// uses its default of every core. Kept as its own pure function so the
+/// presence of `-np 1` is verifiable without spawning chdman.
+fn build_convert_args(
+    kind: &str,
+    force_cd: bool,
+    parallel: bool,
+    disc_path: &Path,
+    out: &Path,
+) -> Vec<std::ffi::OsString> {
     let mut args: Vec<std::ffi::OsString> = Vec::new();
     if should_use_cd(kind, force_cd) {
         args.push("createcd".into());
@@ -42,8 +45,10 @@ fn build_convert_args(kind: &str, force_cd: bool, disc_path: &Path, out: &Path) 
     args.push(disc_path.as_os_str().to_owned());
     args.push("-o".into());
     args.push(out.as_os_str().to_owned());
-    args.push("-np".into());
-    args.push("1".into());
+    if parallel {
+        args.push("-np".into());
+        args.push("1".into());
+    }
     args
 }
 
@@ -58,7 +63,7 @@ fn build_convert_args(kind: &str, force_cd: bool, disc_path: &Path, out: &Path) 
 ///
 /// `active_pids` records the spawned chdman PID for the run's duration, so
 /// `cancel_conversion` (running on a different thread, possibly mid-queue
-/// for other workers) can `taskkill` it immediately regardless of how much
+/// for other workers) can kill it immediately regardless of how much
 /// stdout is still to drain. A kill shows up here as a plain non-zero exit,
 /// which this function reports as `CONVERT_FAILED`/`CONVERT_VERIFY_FAILED`
 /// -- the caller distinguishes a genuine failure from a cancellation by
@@ -68,104 +73,34 @@ pub fn convert_disc(
     disc_path: &Path,
     kind: &str,
     force_cd: bool,
+    parallel: bool,
     active_pids: &Arc<Mutex<Vec<u32>>>,
     mut on_progress: impl FnMut(&str, f32),
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, ChdmanError> {
     let out = disc_path.with_extension("chd");
     // `verify` has no `-np` equivalent (it isn't in verify's own option
     // list per chdman's docs), so the thread-oversubscription guard below
     // only applies to the convert step.
-    let convert_args = build_convert_args(kind, force_cd, disc_path, &out);
+    let convert_args = build_convert_args(kind, force_cd, parallel, disc_path, &out);
 
-    run_with_progress(chdman_path, &convert_args, active_pids, &mut on_progress)
-        .map_err(|_| "CONVERT_FAILED".to_string())?;
+    // A failed or cancelled (killed) convert leaves a truncated .chd behind,
+    // which the next scan would mistake for a finished conversion and hide
+    // the disc for good -- so remove it, unless it was already there before
+    // we started (chdman refuses to overwrite an existing output, so in that
+    // case the file isn't ours to delete).
+    let preexisting = out.exists();
+    if let Err(log) = chdman::run(chdman_path, &convert_args, Some(active_pids), parse_convert_progress, &mut on_progress) {
+        if !preexisting {
+            let _ = std::fs::remove_file(&out);
+        }
+        return Err(ChdmanError::new("CONVERT_FAILED", log));
+    }
 
     let verify_args: Vec<std::ffi::OsString> = vec!["verify".into(), "-i".into(), out.as_os_str().to_owned()];
-    run_with_progress(chdman_path, &verify_args, active_pids, &mut on_progress)
-        .map_err(|_| "CONVERT_VERIFY_FAILED".to_string())?;
+    chdman::run(chdman_path, &verify_args, Some(active_pids), parse_convert_progress, &mut on_progress)
+        .map_err(|log| ChdmanError::new("CONVERT_VERIFY_FAILED", log))?;
 
     Ok(out)
-}
-
-/// Runs `chdman` with `args`, streaming its output line-by-line (splitting
-/// on chdman's bare '\r' progress-overwrite trick) and calling
-/// `on_progress(phase, percent)` for every "Compressing, X%
-/// complete..."/"Verifying, X% complete..." line. chdman writes its progress
-/// lines to **stderr** (confirmed in its own source: `progress()` writes to
-/// `std::cerr` and flushes on every call) -- stdout carries only the
-/// occasional summary line. Both streams are piped and read from their own
-/// thread so a slow/quiet stdout never blocks stderr's progress lines (or
-/// vice versa); the two threads feed a shared channel that this function
-/// drains on the caller's thread, since `on_progress` closes over a
-/// `tauri::Window` and isn't required to be `Send`.
-///
-/// Registers the spawned PID in `active_pids` for the run's duration so an
-/// external `taskkill` can reach it.
-fn run_with_progress(
-    chdman_path: &Path,
-    args: &[std::ffi::OsString],
-    active_pids: &Arc<Mutex<Vec<u32>>>,
-    on_progress: &mut impl FnMut(&str, f32),
-) -> Result<(), ()> {
-    let mut child = Command::new(chdman_path)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(crate::CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|_| ())?;
-
-    let pid = child.id();
-    active_pids.lock().unwrap().push(pid);
-
-    let stdout = child.stdout.take().ok_or(())?;
-    let stderr = child.stderr.take().ok_or(())?;
-
-    let (tx, rx) = mpsc::channel();
-    let tx_stderr = tx.clone();
-    let stdout_reader = thread::spawn(move || stream_progress(stdout, tx));
-    let stderr_reader = thread::spawn(move || stream_progress(stderr, tx_stderr));
-
-    for (phase, percent) in rx {
-        on_progress(phase, percent);
-    }
-
-    let _ = stdout_reader.join();
-    let _ = stderr_reader.join();
-
-    let status = child.wait().map_err(|_| ())?;
-    active_pids.lock().unwrap().retain(|&p| p != pid);
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-/// Reads `reader` to EOF, parsing out "Compressing/Verifying, X% complete"
-/// lines and sending each as `(phase, percent)` through `tx`. Runs on its
-/// own thread (see `run_with_progress`) so it never has to wait its turn
-/// behind the other stream.
-fn stream_progress(mut reader: impl Read, tx: mpsc::Sender<(&'static str, f32)>) {
-    let mut partial = String::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = reader.read(&mut chunk).unwrap_or(0);
-        if n == 0 {
-            break;
-        }
-        partial.push_str(&String::from_utf8_lossy(&chunk[..n]));
-        let normalized = partial.replace("\r\n", "\n").replace('\r', "\n");
-        let mut lines: Vec<&str> = normalized.split('\n').collect();
-        let tail = lines.pop().unwrap_or("").to_string();
-        for line in lines {
-            if let Some(parsed) = parse_convert_progress(line) {
-                let _ = tx.send(parsed);
-            }
-        }
-        partial = tail;
-    }
 }
 
 /// Parses chdman's own progress output for conversion, e.g. "Compressing,
@@ -219,35 +154,51 @@ mod build_convert_args_tests {
     }
 
     #[test]
-    fn every_invocation_pins_to_a_single_compression_thread() {
+    fn parallel_invocations_pin_to_a_single_compression_thread() {
         // The whole point: this crate parallelizes at the process level (one
         // chdman per core, see worker_count), so every single chdman process
         // must be capped to one compression thread of its own -- otherwise
         // N processes times chdman's own default per-core thread pool would
         // oversubscribe the CPU by roughly N² instead of just using it.
-        let cue_args = args_as_strings(&build_convert_args("cue", false, Path::new("Game.cue"), Path::new("Game.chd")));
+        let cue_args = args_as_strings(&build_convert_args("cue", false, true, Path::new("Game.cue"), Path::new("Game.chd")));
         assert!(cue_args.windows(2).any(|w| w == ["-np", "1"]), "{:?}", cue_args);
 
-        let iso_args = args_as_strings(&build_convert_args("iso", false, Path::new("Game.iso"), Path::new("Game.chd")));
+        let iso_args = args_as_strings(&build_convert_args("iso", false, true, Path::new("Game.iso"), Path::new("Game.chd")));
         assert!(iso_args.windows(2).any(|w| w == ["-np", "1"]), "{:?}", iso_args);
     }
 
     #[test]
+    fn sequential_invocations_let_chdman_use_every_core() {
+        // One disc at a time: nothing else competes for the CPU, so chdman
+        // should use its own default (all cores) instead of being capped.
+        for kind in ["cue", "iso"] {
+            let args = args_as_strings(&build_convert_args(kind, false, false, Path::new("Game.x"), Path::new("Game.chd")));
+            assert!(!args.iter().any(|a| a == "-np"), "{:?}", args);
+        }
+    }
+
+    #[test]
+    fn a_dreamcast_gdi_uses_createcd() {
+        let args = args_as_strings(&build_convert_args("gdi", false, true, Path::new("Game.gdi"), Path::new("Game.chd")));
+        assert_eq!(args[0], "createcd");
+    }
+
+    #[test]
     fn a_cue_uses_createcd() {
-        let args = args_as_strings(&build_convert_args("cue", false, Path::new("Game.cue"), Path::new("Game.chd")));
+        let args = args_as_strings(&build_convert_args("cue", false, true, Path::new("Game.cue"), Path::new("Game.chd")));
         assert_eq!(args[0], "createcd");
     }
 
     #[test]
     fn an_iso_defaults_to_createdvd_with_zlib() {
-        let args = args_as_strings(&build_convert_args("iso", false, Path::new("Game.iso"), Path::new("Game.chd")));
+        let args = args_as_strings(&build_convert_args("iso", false, true, Path::new("Game.iso"), Path::new("Game.chd")));
         assert_eq!(args[0], "createdvd");
         assert!(args.windows(2).any(|w| w == ["-c", "zlib"]), "{:?}", args);
     }
 
     #[test]
     fn an_iso_forced_to_cd_uses_createcd_instead() {
-        let args = args_as_strings(&build_convert_args("iso", true, Path::new("Game.iso"), Path::new("Game.chd")));
+        let args = args_as_strings(&build_convert_args("iso", true, true, Path::new("Game.iso"), Path::new("Game.chd")));
         assert_eq!(args[0], "createcd");
     }
 }

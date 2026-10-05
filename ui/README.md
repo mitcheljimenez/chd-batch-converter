@@ -6,11 +6,21 @@ Desktop UI for `../convertir_a_chd.bat`. Built with Tauri.
 
 ## Install
 
-Download the latest installer (`.msi` or the NSIS `.exe`) from
+Download the latest installer from
 [GitHub Releases](https://github.com/mitcheljimenez/chd-batch-converter/releases/latest) —
 no build step needed. The app checks for new versions on its own (see
 [Auto-update](#auto-update) below), so once it's installed you generally
 don't need to come back here for updates.
+
+| Platform | File |
+|---|---|
+| Windows | `CHD.Converter_x.y.z_x64-setup.exe` |
+| Linux | `.AppImage` (auto-updates) or `.deb` (Debian/Ubuntu; does **not** auto-update — install the new `.deb` by hand) |
+| macOS (Apple Silicon) | `CHD.Converter_x.y.z_aarch64.dmg` |
+| macOS (Intel) | `CHD.Converter_x.y.z_x64.dmg` |
+
+Linux and macOS need `chdman` installed separately — see
+[Linux and macOS](#linux-and-macos).
 
 The installer is signed with a self-signed certificate, so Windows
 SmartScreen may warn about an "unknown publisher" the first time you run
@@ -18,24 +28,84 @@ it — that's expected for a project this size (a certificate from a public
 CA costs money this project doesn't spend). Click "More info" → "Run
 anyway" to proceed.
 
+## Linux and macOS
+
+The Windows installer bundles `chdman.exe`; on Linux and macOS, install
+`chdman` with your package manager instead:
+
+| System | Command |
+|---|---|
+| Debian / Ubuntu / Mint | `sudo apt install mame-tools` |
+| Arch / SteamOS | `sudo pacman -S mame-tools` |
+| Fedora | `sudo dnf install mame-tools` |
+| macOS (Homebrew) | `brew install rom-tools` |
+
+With the chdman path in Settings left empty, the app looks for `chdman`
+on `$PATH` and in `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and
+`/usr/games` (a macOS app opened from Finder doesn't see your shell's
+`PATH`, hence the fixed list). If yours is somewhere else, set its full
+path in Settings.
+
+To run the **AppImage**: `chmod +x CHD.Converter_*.AppImage` and open it.
+
+**macOS: first launch.** The app isn't notarized by Apple (that needs a
+paid developer account), only ad-hoc signed, so Gatekeeper blocks the
+first launch with an "unidentified developer" / "can't be verified"
+message:
+
+1. Drag the app from the `.dmg` into Applications and try to open it once
+   (it will be blocked).
+2. Open **System Settings → Privacy & Security**, scroll down and click
+   **Open Anyway** next to the message about CHD Converter, then confirm.
+   (On macOS 14 and earlier, right-click the app → Open → Open also works.)
+
+Or, from Terminal: `xattr -cr "/Applications/CHD Converter.app"`.
+You only need to do this once; later auto-updates open normally.
+
 ## Usage
 
 1. Run the installed app. It defaults to Spanish; switch to English (or
    back) from the "Idioma"/"Language" selector in Settings — it applies
    and saves immediately.
-2. Open Settings and set the path to your `chdman.exe` (bundled by
-   default, so this step is optional unless you want to use your own).
-3. Click "Elegir carpeta" and pick your ROMs folder.
+2. Open Settings and set the path to your `chdman` (on Windows it's
+   bundled, and on Linux/macOS the one your package manager installed is
+   found automatically, so this step is optional unless you want to use
+   your own).
+3. Click "Elegir carpeta" and pick your ROMs folder, or just drag the
+   folder (or any file inside it) onto the window. The app remembers it
+   and reopens it next time.
 4. On the "Convertir" section, review the detected games, then click
    "Convertir todo". PS2 `.iso` games default to DVD format with `zlib`
    compression, which plays correctly both on PC (PCSX2) and on Android
    (NetherSX2/AetherSX2). Each `.iso` row also has a "DVD (zlib)"/"CD"
    dropdown if you want to force CD format for a specific game instead —
    you shouldn't normally need to, but it's there as an escape hatch.
-   Conversion runs **in parallel**: one `chdman` process per CPU core
-   converts at once, instead of one disc at a time, so a large library
-   finishes noticeably faster on a multi-core machine.
-5. Watch live progress; use "Cancelar" to stop early if needed.
+   Dreamcast dumps (`.gdi` plus its tracks) are converted too, with
+   `chdman createcd`, and "Extraer .chd" turns a Dreamcast `.chd` back
+   into a `.gdi` with its tracks. "Aplanar carpetas" leaves folders that
+   hold a `.gdi` untouched, since Dreamcast tracks usually share generic
+   names (`track01.bin`, ...) that would collide.
+   Conversion runs **in parallel** by default: one `chdman` process per
+   CPU core converts at once, instead of one disc at a time, so a large
+   library finishes noticeably faster on a multi-core machine. Prefer one
+   disc at a time (in order, with the PC more responsive meanwhile)?
+   Uncheck "Convertir varios discos a la vez" in Settings; that single
+   `chdman` then uses every core on its own.
+   Want the space back? Check "Mover los archivos originales a la
+   papelera tras convertir y verificar" (right under the buttons): once a
+   disc converts **and** `chdman verify` passes on its new `.chd`, its
+   originals (the `.cue` and every track it lists, the `.gdi` and its
+   tracks, or the `.iso`) go to the system trash / Recycle Bin, never
+   deleted outright, so you can still restore them. Off by default, and a
+   disc that fails or is cancelled always keeps its originals.
+5. Watch live progress; use "Cancelar" to stop early if needed. Each
+   converted disc shows its size before and after (e.g. `700 MB → 450 MB
+   (-36 %)`), and the run ends with the total space saved, which is also
+   kept in "Historial". If you're in another app when a conversion or
+   extraction finishes, a system notification tells you how it went.
+   If a disc fails, click "Ver detalles" on its row to see exactly what
+   `chdman` reported (the same works in "Extraer .chd" and
+   "Verificar .chd").
 6. Check "Historial" any time for past runs.
 7. Need to undo a conversion (e.g. to recover a `.chd` made unreadable on
    Android by an old version of this app)? See [Extraer .chd](#extraer-chd)
@@ -87,6 +157,16 @@ todo" on that folder to get a fresh, DVD-zlib `.chd`. The original `.chd`
 is never deleted or modified — extraction is refused instead of
 overwriting if the destination file already exists.
 
+## Verificar .chd
+
+Checks that `.chd` files you already have are still intact, without
+converting or extracting anything: `chdman verify` re-reads each one and
+compares it with the SHA-1 stored inside it. Handy after copying a
+library to another drive, an SD card or a handheld. Each file shows
+"intacto" or "DAÑADO" (a corrupt one should be reconverted from its
+original), "Cancelar" stops after the file in progress, and nothing is
+ever modified.
+
 ## Auto-update
 
 The app checks GitHub Releases for new versions automatically:
@@ -109,10 +189,16 @@ npm install
 npm run tauri build
 ```
 
-The finished `.exe` is at `ui/src-tauri/target/release/chd-converter-ui.exe` (or
-similar, per `tauri.conf.json`'s `productName`). It bundles `convertir_a_chd.bat`
-and a fallback `chdman.exe` alongside itself at build time, so it works out of
-the box. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the bundled
+The bundles land in `ui/src-tauri/target/release/bundle/` (NSIS `.exe`
+on Windows, `.AppImage`/`.deb` on Linux, `.app`/`.dmg` on macOS). Shared
+settings live in `tauri.conf.json`; per-platform ones in
+`tauri.windows.conf.json`, `tauri.linux.conf.json` and
+`tauri.macos.conf.json`, which Tauri merges on top automatically. The
+Windows build bundles a fallback `chdman.exe` (and the legacy
+`convertir_a_chd.bat`), so it works out of the box.
+
+On Linux, building needs the WebKitGTK toolchain first:
+`sudo apt install libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xdg-utils`. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the bundled
 `chdman.exe`'s license.
 
 ## Develop

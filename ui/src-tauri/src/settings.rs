@@ -7,6 +7,10 @@ fn default_language() -> String {
     "es".to_string()
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub chdman_path: String,
@@ -14,6 +18,19 @@ pub struct Config {
     pub auto_update_enabled: bool,
     #[serde(default = "default_language")]
     pub language: String,
+    /// Convert several discs at once (one chdman per CPU core) instead of
+    /// one at a time. Defaults to true so configs saved before this option
+    /// existed keep the parallel behavior they already had.
+    #[serde(default = "default_true")]
+    pub parallel_conversion: bool,
+    /// After a disc converts and verifies, send its original files (the
+    /// .cue/.gdi and its tracks, or the .iso) to the system trash. Off by
+    /// default: originals are never touched unless the user opts in.
+    #[serde(default)]
+    pub trash_originals: bool,
+    /// The folder last chosen, reopened on the next launch ("" for none).
+    #[serde(default)]
+    pub last_folder: String,
 }
 
 impl Default for Config {
@@ -22,6 +39,9 @@ impl Default for Config {
             chdman_path: String::new(),
             auto_update_enabled: false,
             language: default_language(),
+            parallel_conversion: true,
+            trash_originals: false,
+            last_folder: String::new(),
         }
     }
 }
@@ -49,6 +69,13 @@ pub struct RunRecord {
     pub skipped: u32,
     pub failed: u32,
     pub cancelled: bool,
+    /// Combined size of the originals and of the resulting .chd files, over
+    /// the discs this run converted. 0 for runs recorded before this was
+    /// tracked.
+    #[serde(default)]
+    pub original_bytes: u64,
+    #[serde(default)]
+    pub chd_bytes: u64,
 }
 
 pub fn load_history(app_dir: &Path) -> Vec<RunRecord> {
@@ -94,6 +121,9 @@ mod tests {
             chdman_path: "C:\\Tools\\chdman.exe".to_string(),
             auto_update_enabled: false,
             language: "es".to_string(),
+            parallel_conversion: true,
+            trash_originals: false,
+            last_folder: String::new(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
@@ -118,6 +148,8 @@ mod tests {
             skipped: 1,
             failed: 0,
             cancelled: false,
+            original_bytes: 3_000,
+            chd_bytes: 1_200,
         };
         let r2 = RunRecord {
             timestamp: "2026-09-15T11:00:00".to_string(),
@@ -126,6 +158,8 @@ mod tests {
             skipped: 0,
             failed: 0,
             cancelled: true,
+            original_bytes: 0,
+            chd_bytes: 0,
         };
         append_history(&dir, r1.clone()).unwrap();
         append_history(&dir, r2.clone()).unwrap();
@@ -150,6 +184,9 @@ mod tests {
             chdman_path: "C:\\Tools\\chdman.exe".to_string(),
             auto_update_enabled: true,
             language: "es".to_string(),
+            parallel_conversion: true,
+            trash_originals: false,
+            last_folder: String::new(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
@@ -172,10 +209,46 @@ mod tests {
             chdman_path: "C:\\Tools\\chdman.exe".to_string(),
             auto_update_enabled: false,
             language: "en".to_string(),
+            parallel_conversion: true,
+            trash_originals: false,
+            last_folder: String::new(),
         };
         save_config(&dir, &config).unwrap();
         let loaded = load_config(&dir);
         assert_eq!(loaded.language, "en");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_config_defaults_to_parallel_conversion() {
+        let dir = temp_dir("default_parallel");
+        // A config saved before the option existed has no such key.
+        fs::write(dir.join("config.json"), r#"{"chdman_path":"","auto_update_enabled":false,"language":"es"}"#).unwrap();
+        assert!(load_config(&dir).parallel_conversion);
+        assert!(Config::default().parallel_conversion);
+    }
+
+    #[test]
+    fn save_then_load_config_round_trips_sequential_mode() {
+        let dir = temp_dir("roundtrip_sequential");
+        let config = Config {
+            parallel_conversion: false,
+            ..Config::default()
+        };
+        save_config(&dir, &config).unwrap();
+        assert!(!load_config(&dir).parallel_conversion);
+    }
+
+    #[test]
+    fn history_saved_before_sizes_were_tracked_still_loads() {
+        let dir = temp_dir("old_history");
+        fs::write(
+            dir.join("historial.json"),
+            r#"[{"timestamp":"1","folder":"C:\\Games","converted":2,"skipped":0,"failed":0,"cancelled":false}]"#,
+        )
+        .unwrap();
+        let loaded = load_history(&dir);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!((loaded[0].original_bytes, loaded[0].chd_bytes), (0, 0));
     }
 }

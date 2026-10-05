@@ -9,8 +9,22 @@ const translations = {
     cancel: "Cancelar",
     settings: "Configuración",
     history: "Historial",
-    chdmanPathLabel: "Ruta de chdman.exe",
+    chdmanPathLabel: "Ruta de chdman",
+    chdmanInstallHint: (command) =>
+      `Déjalo vacío para usar el chdman instalado en el sistema. Si no lo tienes: ${command}`,
     autoUpdateLabel: "Instalar actualizaciones automáticamente",
+    parallelConversionLabel: "Convertir varios discos a la vez",
+    trashOriginalsLabel: "Mover los archivos originales a la papelera tras convertir y verificar",
+    sizeChange: (before, after, change) => `${before} → ${after} (${change})`,
+    runSavings: (saved, percent) => `Espacio ahorrado: ${saved} (${percent} menos)`,
+    historySaved: (saved) => `ahorró ${saved}`,
+    notifyConvertDone: "Conversión terminada",
+    notifyExtractDone: "Extracción terminada",
+    notifySummary: (ok, failed) => (failed > 0 ? `${ok} correctos, ${failed} con errores` : `${ok} correctos`),
+    noteORIGINALS_TRASHED: "originales enviados a la papelera",
+    noteORIGINALS_TRASH_FAILED: "no se pudieron mover los originales a la papelera (siguen en su sitio)",
+    parallelConversionHint:
+      "Activado: un disco por núcleo del procesador, más rápido con muchos juegos. Desactivado: un disco a la vez usando todos los núcleos; deja el PC más libre mientras convierte y avanza en orden.",
     languageLabel: "Idioma",
     save: "Guardar",
     checkUpdates: "Buscar actualizaciones",
@@ -73,14 +87,29 @@ const translations = {
         : "."),
     flattenFailed: (err) => `No se pudo aplanar: ${err}`,
     navExtract: "Extraer .chd",
+    navVerify: "Verificar .chd",
+    showLog: "Ver detalles",
+    hideLog: "Ocultar detalles",
+    verifyExplanation:
+      "Comprueba que tus .chd sigan intactos: chdman relee cada archivo y lo compara con la huella guardada dentro. Útil tras copiarlos a otro disco, a una tarjeta SD o a la consola. No modifica nada.",
+    verifyAllBtn: "Verificar todos",
+    verifyNoFilesFound: "No se encontraron archivos .chd en esta carpeta.",
+    verifyPhase: (percent) => `Verificando ${percent}%`,
+    verifyOk: "intacto",
+    verifyFailed: "DAÑADO: no coincide con su huella; conviene volver a convertirlo desde el original",
+    verifySummary: (ok, failed) =>
+      failed > 0 ? `${ok} intactos, ${failed} dañados` : `Los ${ok} archivos están intactos`,
+    verifySummaryCancelled: (ok, failed) => `Cancelado: ${ok} intactos, ${failed} dañados hasta ahora`,
+    notifyVerifyDone: "Verificación terminada",
     extractExplanation:
-      "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso o .bin/.cue, detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.",
+      "Esto busca archivos .chd en la carpeta elegida y permite extraerlos de vuelta a .iso, .bin/.cue o .gdi (Dreamcast), detectando el formato automáticamente y verificando el .chd original tras cada extracción. El .chd original no se toca ni se borra.",
     extractNoFolderHint: "Elige una carpeta primero.",
     extractNoFilesFound: "No se encontraron archivos .chd en esta carpeta.",
     extractAllBtn: "Extraer todos",
     extractBtn: "Extraer",
     extractKindCd: "CD",
     extractKindDvd: "DVD",
+    extractKindGd: "GD-ROM (Dreamcast)",
     extractKindUnknown: "Desconocido",
     extractDone: (path) => `Extraído: ${path}`,
     extractFailed: (err) => `No se pudo extraer: ${err}`,
@@ -99,9 +128,12 @@ const translations = {
     updateDismiss: "Cerrar",
     versionLabel: (version) => `Versión instalada: ${version}`,
     errors: {
-      CHDMAN_NOT_CONFIGURED: "No se configuró la ruta de chdman.exe",
+      CHDMAN_NOT_CONFIGURED: () =>
+        chdmanInstallCommand()
+          ? `No se encontró chdman en el sistema. Instálalo con: ${chdmanInstallCommand()}. También puedes indicar su ruta en Configuración.`
+          : "No se configuró la ruta de chdman.exe",
       CHDMAN_NOT_FOUND: (path) =>
-        `chdman.exe no encontrado en la ruta configurada: ${path}`,
+        `chdman no encontrado en la ruta configurada: ${path}`,
       SCRIPT_NOT_FOUND: "No se encontró el script de conversión incluido",
       CONVERSION_IN_PROGRESS: "Ya hay una conversión en curso",
       UPDATE_DEFERRED_CONVERSION_IN_PROGRESS:
@@ -112,6 +144,7 @@ const translations = {
       EXTRACT_FAILED: "chdman no pudo extraer este archivo",
       EXTRACT_VERIFY_FAILED: "Se extrajo el archivo, pero chdman no pudo verificar el .chd original",
       EXTRACT_IN_PROGRESS: "Ya hay una extracción en curso",
+      VERIFY_IN_PROGRESS: "Ya hay una verificación en curso",
     },
   },
   en: {
@@ -124,8 +157,22 @@ const translations = {
     cancel: "Cancel",
     settings: "Settings",
     history: "History",
-    chdmanPathLabel: "Path to chdman.exe",
+    chdmanPathLabel: "Path to chdman",
+    chdmanInstallHint: (command) =>
+      `Leave empty to use the chdman installed on your system. If you don't have it: ${command}`,
     autoUpdateLabel: "Install updates automatically",
+    parallelConversionLabel: "Convert several discs at once",
+    trashOriginalsLabel: "Move the original files to the trash after converting and verifying",
+    sizeChange: (before, after, change) => `${before} → ${after} (${change})`,
+    runSavings: (saved, percent) => `Space saved: ${saved} (${percent} smaller)`,
+    historySaved: (saved) => `saved ${saved}`,
+    notifyConvertDone: "Conversion finished",
+    notifyExtractDone: "Extraction finished",
+    notifySummary: (ok, failed) => (failed > 0 ? `${ok} succeeded, ${failed} failed` : `${ok} succeeded`),
+    noteORIGINALS_TRASHED: "originals moved to the trash",
+    noteORIGINALS_TRASH_FAILED: "couldn't move the originals to the trash (they're still in place)",
+    parallelConversionHint:
+      "On: one disc per CPU core, faster for large libraries. Off: one disc at a time using every core; keeps the PC more responsive while converting and goes in order.",
     languageLabel: "Language",
     save: "Save",
     checkUpdates: "Check for updates",
@@ -188,14 +235,29 @@ const translations = {
         : "."),
     flattenFailed: (err) => `Could not flatten: ${err}`,
     navExtract: "Extract .chd",
+    navVerify: "Verify .chd",
+    showLog: "Show details",
+    hideLog: "Hide details",
+    verifyExplanation:
+      "Checks that your .chd files are still intact: chdman re-reads each one and compares it with the fingerprint stored inside. Useful after copying them to another drive, an SD card or a console. Changes nothing.",
+    verifyAllBtn: "Verify all",
+    verifyNoFilesFound: "No .chd files found in this folder.",
+    verifyPhase: (percent) => `Verifying ${percent}%`,
+    verifyOk: "intact",
+    verifyFailed: "CORRUPT: doesn't match its fingerprint; reconvert it from the original if you can",
+    verifySummary: (ok, failed) =>
+      failed > 0 ? `${ok} intact, ${failed} corrupt` : `All ${ok} files are intact`,
+    verifySummaryCancelled: (ok, failed) => `Cancelled: ${ok} intact, ${failed} corrupt so far`,
+    notifyVerifyDone: "Verification finished",
     extractExplanation:
-      "This looks for .chd files in the chosen folder and lets you extract them back to .iso or .bin/.cue, auto-detecting the format and verifying the original .chd after each extraction. The original .chd is never touched or deleted.",
+      "This looks for .chd files in the chosen folder and lets you extract them back to .iso, .bin/.cue or .gdi (Dreamcast), auto-detecting the format and verifying the original .chd after each extraction. The original .chd is never touched or deleted.",
     extractNoFolderHint: "Choose a folder first.",
     extractNoFilesFound: "No .chd files found in this folder.",
     extractAllBtn: "Extract all",
     extractBtn: "Extract",
     extractKindCd: "CD",
     extractKindDvd: "DVD",
+    extractKindGd: "GD-ROM (Dreamcast)",
     extractKindUnknown: "Unknown",
     extractDone: (path) => `Extracted: ${path}`,
     extractFailed: (err) => `Could not extract: ${err}`,
@@ -214,9 +276,12 @@ const translations = {
     updateDismiss: "Close",
     versionLabel: (version) => `Installed version: ${version}`,
     errors: {
-      CHDMAN_NOT_CONFIGURED: "chdman.exe path is not configured",
+      CHDMAN_NOT_CONFIGURED: () =>
+        chdmanInstallCommand()
+          ? `chdman was not found on this system. Install it with: ${chdmanInstallCommand()}. You can also set its path in Settings.`
+          : "chdman.exe path is not configured",
       CHDMAN_NOT_FOUND: (path) =>
-        `chdman.exe not found at the configured path: ${path}`,
+        `chdman not found at the configured path: ${path}`,
       SCRIPT_NOT_FOUND: "The bundled conversion script was not found",
       CONVERSION_IN_PROGRESS: "A conversion is already in progress",
       UPDATE_DEFERRED_CONVERSION_IN_PROGRESS:
@@ -227,11 +292,58 @@ const translations = {
       EXTRACT_FAILED: "chdman failed to extract this file",
       EXTRACT_VERIFY_FAILED: "The file was extracted, but chdman could not verify the original .chd",
       EXTRACT_IN_PROGRESS: "An extraction is already in progress",
+      VERIFY_IN_PROGRESS: "A verification is already in progress",
     },
   },
 };
 
 let currentLanguage = "es";
+// "windows" | "linux" | "macos" (from the backend's get_platform). Windows
+// bundles chdman.exe with the installer; elsewhere it comes from the
+// system's package manager, so errors/settings show how to install it.
+let currentPlatform = "windows";
+
+export function setPlatform(platform) {
+  currentPlatform = platform;
+}
+
+export function chdmanInstallCommand() {
+  switch (currentPlatform) {
+    case "macos":
+      return "brew install rom-tools";
+    case "linux":
+      return "sudo apt install mame-tools (Debian/Ubuntu) · sudo pacman -S mame-tools (Arch) · sudo dnf install mame-tools (Fedora)";
+    default:
+      return null;
+  }
+}
+
+// Human-readable size in the current language's number format, using
+// 1024-based units like Windows Explorer and most file managers.
+export function formatBytes(bytes) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = Math.abs(bytes);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const number = new Intl.NumberFormat(currentLanguage === "es" ? "es-ES" : "en-US", {
+    maximumFractionDigits: unit >= 3 ? 2 : 1,
+  }).format(value);
+  return `${bytes < 0 ? "-" : ""}${number} ${units[unit]}`;
+}
+
+// Percent change from `before` to `after`, signed ("-36 %" when smaller).
+export function formatPercentChange(before, after) {
+  if (before <= 0) return "";
+  const change = ((after - before) / before) * 100;
+  const number = new Intl.NumberFormat(currentLanguage === "es" ? "es-ES" : "en-US", {
+    maximumFractionDigits: 0,
+    signDisplay: "exceptZero",
+  }).format(change);
+  return `${number} %`;
+}
 
 export function setLanguage(language) {
   currentLanguage = translations[language] ? language : "es";

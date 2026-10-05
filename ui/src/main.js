@@ -1,4 +1,12 @@
-import { t, setLanguage, translateError } from "./i18n.js";
+import {
+  t,
+  setLanguage,
+  setPlatform,
+  chdmanInstallCommand,
+  translateError,
+  formatBytes,
+  formatPercentChange,
+} from "./i18n.js";
 
 const { invoke } = window.__TAURI__.core;
 const { open } = window.__TAURI__.dialog;
@@ -9,7 +17,7 @@ let currentFolder = null;
 let organizeDestination = null;
 let moveChdDestination = null;
 let discs = []; // [{ name, folder, kind, status: "pending"|"ok"|"skip"|"fail", message: "" }]
-let formatOverrides = new Set(); // full paths ("folder\\name") the user forced to CD format
+let formatOverrides = new Set(); // full paths (see joinPath) the user forced to CD format
 
 const pickFolderBtn = document.getElementById("pick-folder-btn");
 const rescanBtn = document.getElementById("rescan-btn");
@@ -37,6 +45,7 @@ const settingsView = document.getElementById("settings-view");
 
 const chdmanPathLabel = document.getElementById("chdman-path-label");
 const chdmanPathInput = document.getElementById("chdman-path-input");
+const chdmanInstallHint = document.getElementById("chdman-install-hint");
 const saveSettingsBtn = document.getElementById("save-settings-btn");
 const historyPanel = document.getElementById("history-panel");
 const organizeExplanation = document.getElementById("organize-explanation");
@@ -61,6 +70,16 @@ const flattenExplanation = document.getElementById("flatten-explanation");
 const flattenNoFolderHint = document.getElementById("flatten-no-folder-hint");
 const runFlattenBtn = document.getElementById("run-flatten-btn");
 const navExtract = document.getElementById("nav-extract");
+const navVerify = document.getElementById("nav-verify");
+const verifyView = document.getElementById("verify-view");
+const verifyExplanation = document.getElementById("verify-explanation");
+const verifyNoFolderHint = document.getElementById("verify-no-folder-hint");
+const verifyAllBtn = document.getElementById("verify-all-btn");
+const verifyCancelBtn = document.getElementById("verify-cancel-btn");
+const verifySummary = document.getElementById("verify-summary");
+const verifyProgressTrack = document.getElementById("verify-progress-track");
+const verifyProgressFill = document.getElementById("verify-progress-fill");
+const verifyTable = document.getElementById("verify-table");
 const extractView = document.getElementById("extract-view");
 const extractExplanation = document.getElementById("extract-explanation");
 const extractNoFolderHint = document.getElementById("extract-no-folder-hint");
@@ -70,6 +89,12 @@ const extractProgressFill = document.getElementById("extract-progress-fill");
 const extractTable = document.getElementById("extract-table");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const autoUpdateLabelText = document.getElementById("auto-update-label-text");
+const parallelConversionCheckbox = document.getElementById("parallel-conversion-checkbox");
+const trashOriginalsCheckbox = document.getElementById("trash-originals-checkbox");
+const savingsLabel = document.getElementById("savings-label");
+const trashOriginalsLabelText = document.getElementById("trash-originals-label-text");
+const parallelConversionLabelText = document.getElementById("parallel-conversion-label-text");
+const parallelConversionHint = document.getElementById("parallel-conversion-hint");
 const languageLabelText = document.getElementById("language-label-text");
 const languageSelect = document.getElementById("language-select");
 const checkUpdatesBtn = document.getElementById("check-updates-btn");
@@ -91,6 +116,7 @@ const views = {
   moveChd: moveChdView,
   flatten: flattenView,
   extract: extractView,
+  verify: verifyView,
   history: historyView,
   settings: settingsView,
 };
@@ -100,6 +126,7 @@ const navButtons = {
   moveChd: navMoveChd,
   flatten: navFlatten,
   extract: navExtract,
+  verify: navVerify,
   history: navHistory,
   settings: navSettings,
 };
@@ -118,6 +145,7 @@ async function showView(name) {
     const config = await invoke("get_config");
     chdmanPathInput.value = config.chdman_path;
     autoUpdateCheckbox.checked = config.auto_update_enabled;
+    parallelConversionCheckbox.checked = config.parallel_conversion;
     languageSelect.value = config.language;
   } else if (name === "history") {
     await renderHistory();
@@ -134,11 +162,20 @@ async function showView(name) {
     // replace them with a fresh "pending" scan, discarding real state for
     // no reason.
     extractNoFolderHint.style.display = currentFolder ? "none" : "block";
-    if (currentFolder && chdsScannedForFolder !== currentFolder) {
+    if (currentFolder && chdsScannedForFolder !== currentFolder && !extractRunning) {
       await rescanChds();
     } else {
       renderExtractTable();
       updateExtractAllAvailability();
+    }
+  } else if (name === "verify") {
+    // Same caching rule as Extract: rescan on the first visit for a folder
+    // (or after something changed its .chd files), never mid-run.
+    verifyNoFolderHint.style.display = currentFolder ? "none" : "block";
+    if (currentFolder && verifyScannedForFolder !== currentFolder && !verifyRunning) {
+      await rescanVerify();
+    } else {
+      renderVerifyTable();
     }
   }
 }
@@ -148,6 +185,7 @@ navOrganize.addEventListener("click", () => showView("organize"));
 navMoveChd.addEventListener("click", () => showView("moveChd"));
 navFlatten.addEventListener("click", () => showView("flatten"));
 navExtract.addEventListener("click", () => showView("extract"));
+navVerify.addEventListener("click", () => showView("verify"));
 navHistory.addEventListener("click", () => showView("history"));
 navSettings.addEventListener("click", () => showView("settings"));
 
@@ -157,6 +195,15 @@ navSettings.addEventListener("click", () => showView("settings"));
 // applyTranslations() can re-render the label's text in the new language
 // without re-invoking the backend every time.
 let appVersion = null;
+// "windows" | "linux" | "macos", also fetched once at startup.
+let platform = "windows";
+
+// Joins a folder and file name the way the backend's Path::join does, so a
+// path built here compares equal to (and can be handed back as) one built
+// in Rust: "\\" on Windows, "/" on Linux/macOS.
+function joinPath(folder, name) {
+  return `${folder}${platform === "windows" ? "\\" : "/"}${name}`;
+}
 
 function updateVersionLabel() {
   if (appVersion) appVersionLabel.textContent = t("versionLabel", appVersion);
@@ -175,7 +222,13 @@ function applyTranslations() {
   navHistory.textContent = t("history");
   navSettings.textContent = t("settings");
   chdmanPathLabel.textContent = t("chdmanPathLabel");
+  const installCommand = chdmanInstallCommand();
+  chdmanInstallHint.style.display = installCommand ? "" : "none";
+  if (installCommand) chdmanInstallHint.textContent = t("chdmanInstallHint", installCommand);
   autoUpdateLabelText.textContent = t("autoUpdateLabel");
+  parallelConversionLabelText.textContent = t("parallelConversionLabel");
+  parallelConversionHint.textContent = t("parallelConversionHint");
+  trashOriginalsLabelText.textContent = t("trashOriginalsLabel");
   languageLabelText.textContent = t("languageLabel");
   saveSettingsBtn.textContent = t("save");
   checkUpdatesBtn.textContent = t("checkUpdates");
@@ -204,7 +257,33 @@ function applyTranslations() {
   runFlattenBtn.textContent = t("runFlatten");
   navExtract.textContent = t("navExtract");
   extractExplanation.textContent = t("extractExplanation");
+  navVerify.textContent = t("navVerify");
+  verifyExplanation.textContent = t("verifyExplanation");
+  verifyAllBtn.textContent = t("verifyAllBtn");
+  verifyCancelBtn.textContent = t("cancel");
+  verifyNoFolderHint.textContent = t("flattenNoFolderHint");
+  extractNoFolderHint.textContent = t("flattenNoFolderHint");
   extractAllBtn.textContent = t("extractAllBtn");
+}
+
+// For a failed row: a "Ver detalles" toggle that expands chdman's own
+// output for that item. `item.logOpen` keeps it open across the frequent
+// table re-renders.
+function appendLogToggle(row, item) {
+  if (!item.log) return;
+  const toggle = document.createElement("button");
+  toggle.className = "log-toggle";
+  toggle.textContent = t(item.logOpen ? "hideLog" : "showLog");
+  const pre = document.createElement("pre");
+  pre.className = "chdman-log";
+  pre.textContent = item.log;
+  pre.style.display = item.logOpen ? "block" : "none";
+  toggle.addEventListener("click", () => {
+    item.logOpen = !item.logOpen;
+    toggle.textContent = t(item.logOpen ? "hideLog" : "showLog");
+    pre.style.display = item.logOpen ? "block" : "none";
+  });
+  row.append(toggle, pre);
 }
 
 function mk(cls, text) {
@@ -248,9 +327,9 @@ function renderTable() {
       cdOption.value = "cd";
       cdOption.textContent = t("overrideFormatCd");
       select.append(dvdOption, cdOption);
-      select.value = formatOverrides.has(`${disc.folder}\\${disc.name}`) ? "cd" : "dvd";
+      select.value = formatOverrides.has(joinPath(disc.folder, disc.name)) ? "cd" : "dvd";
       select.addEventListener("change", () => {
-        const fullPath = `${disc.folder}\\${disc.name}`;
+        const fullPath = joinPath(disc.folder, disc.name);
         if (select.value === "cd") {
           formatOverrides.add(fullPath);
         } else {
@@ -271,6 +350,7 @@ function renderTable() {
       track.appendChild(fill);
       row.appendChild(track);
     }
+    if (disc.status === "fail") appendLogToggle(row, disc);
 
     discTable.appendChild(row);
   }
@@ -281,8 +361,11 @@ function renderTable() {
 // (the total scanned), this drops as each disc finishes so the "N files to
 // convert" label stays accurate mid-run instead of just showing the count
 // from the initial scan forever.
+// Discs still without a .chd: queued ones, any a cancelled run never
+// finished, and any that failed (their partial .chd is removed, so all of
+// them still need converting).
 function pendingDiscCount() {
-  return discs.filter((d) => d.status === "pending").length;
+  return discs.filter((d) => d.status === "pending" || d.status === "cancel" || d.status === "fail").length;
 }
 
 function updatePendingLabel() {
@@ -353,6 +436,7 @@ runMoveChdBtn.addEventListener("click", async () => {
   if (!currentFolder || !moveChdDestination) return;
   try {
     const summary = await invoke("move_chd_files", { root: currentFolder, destination: moveChdDestination });
+    invalidateChdScan();
     alert(t("moveChdSummary", summary));
     moveChdOpenDestBtn.style.display = summary.files_moved > 0 ? "inline-block" : "none";
   } catch (err) {
@@ -373,6 +457,7 @@ runFlattenBtn.addEventListener("click", async () => {
   if (!currentFolder) return;
   try {
     const summary = await invoke("flatten_folders", { root: currentFolder });
+    invalidateChdScan();
     alert(t("flattenSummary", summary));
   } catch (err) {
     alert(t("flattenFailed", translateError(err)));
@@ -395,6 +480,14 @@ let extractRunning = false;
 // genuinely new folder (needs a fresh scan) apart from just re-opening the
 // tab on the same one (must NOT wipe existing rows/results).
 let chdsScannedForFolder = null;
+
+// Converting, moving, flattening or organizing changes which .chd files
+// exist, so the Extract tab's list must be rebuilt on its next visit
+// instead of showing the pre-change scan.
+function invalidateChdScan() {
+  chdsScannedForFolder = null;
+  verifyScannedForFolder = null;
+}
 // The items the in-flight run() was started with -- NOT always all of
 // `chds` (a single row's "Extraer" button runs just that one item). The
 // overall progress bar must be computed against this subset, not the full
@@ -402,7 +495,7 @@ let chdsScannedForFolder = null;
 let currentRunChds = [];
 
 function fullChdPath(chd) {
-  return `${chd.folder}\\${chd.name}`;
+  return joinPath(chd.folder, chd.name);
 }
 
 async function rescanChds() {
@@ -465,7 +558,7 @@ function renderExtractTable() {
   for (const chd of chds) {
     const row = document.createElement("div");
     row.className = "disc-row";
-    const kindLabel = { cd: t("extractKindCd"), dvd: t("extractKindDvd"), unknown: t("extractKindUnknown") }[chd.kind];
+    const kindLabel = { cd: t("extractKindCd"), dvd: t("extractKindDvd"), gd: t("extractKindGd"), unknown: t("extractKindUnknown") }[chd.kind];
     const icon = { pending: "•", ok: "✅", fail: "❌" }[chd.status];
     const main = document.createElement("div");
     main.className = "disc-row-main";
@@ -505,6 +598,7 @@ function renderExtractTable() {
       track.appendChild(fill);
       row.appendChild(track);
     }
+    if (chd.status === "fail") appendLogToggle(row, chd);
 
     extractTable.appendChild(row);
   }
@@ -560,11 +654,12 @@ listen("extract-item-progress", (event) => {
 });
 
 listen("extract-item-done", (event) => {
-  const { chd_path, output, error } = event.payload;
+  const { chd_path, output, error, log } = event.payload;
   const chd = matchChdByPath(chd_path);
   if (chd) {
     chd.progressPercent = undefined;
     chd.progressPhase = undefined;
+    chd.log = log ?? null;
     if (error) {
       chd.status = "fail";
       chd.error = translateError(error);
@@ -577,27 +672,188 @@ listen("extract-item-done", (event) => {
   }
 });
 
-listen("extract-all-finished", () => {
+listen("extract-all-finished", (event) => {
+  const { done = 0, failed = 0 } = event?.payload ?? {};
+  notifyIfAway(t("notifyExtractDone"), t("notifySummary", done, failed));
   extractRunning = false;
   currentRunChds = [];
   extractProgressTrack.style.display = "none";
   updateExtractAllAvailability();
 });
 
-pickFolderBtn.addEventListener("click", async () => {
-  const selected = await open({ directory: true, multiple: false });
-  if (!selected) return;
-
-  currentFolder = selected;
-  folderLabel.textContent = selected;
+// Makes `folder` the working folder and scans it. Shared by the picker,
+// restoring the last folder at startup, and dropping a folder on the window.
+async function selectFolder(folder) {
+  currentFolder = folder;
+  folderLabel.textContent = folder;
   updateOrganizeAvailability();
   updateMoveChdAvailability();
   updateFlattenAvailability();
   rescanBtn.disabled = false;
   convertOpenFolderBtn.disabled = false;
+  // Remembered so the next launch opens straight into it.
+  saveConfig();
 
-  await rescan(selected);
+  await rescan(folder);
   await rescanChds();
+  verifyScannedForFolder = null;
+  if (verifyView.style.display !== "none") await rescanVerify();
+}
+
+// ---- Verificar .chd ----------------------------------------------------
+// Re-runs `chdman verify` over existing .chd files without converting or
+// extracting anything, to catch copies corrupted after the fact.
+let verifyItems = []; // { name, folder, status: "pending"|"ok"|"fail", percent? }
+let verifyScannedForFolder = null;
+let verifyRunning = false;
+
+async function rescanVerify() {
+  verifyNoFolderHint.style.display = currentFolder ? "none" : "block";
+  verifySummary.style.display = "none";
+  if (!currentFolder) {
+    verifyItems = [];
+    verifyScannedForFolder = null;
+    renderVerifyTable();
+    return;
+  }
+  const scanned = await invoke("prescan_verify", { root: currentFolder });
+  verifyItems = scanned.map((c) => ({ ...c, status: "pending" }));
+  verifyScannedForFolder = currentFolder;
+  renderVerifyTable();
+}
+
+function renderVerifyTable() {
+  verifyTable.innerHTML = "";
+  verifyAllBtn.disabled = verifyRunning || verifyItems.length === 0;
+  if (currentFolder && verifyItems.length === 0) {
+    verifyTable.appendChild(mk("disc-message", t("verifyNoFilesFound")));
+    return;
+  }
+  for (const item of verifyItems) {
+    const row = document.createElement("div");
+    row.className = "disc-row";
+    const main = document.createElement("div");
+    main.className = "disc-row-main";
+    const icon = { pending: "•", ok: "✅", fail: "❌" }[item.status];
+    let message = "";
+    if (item.status === "ok") message = t("verifyOk");
+    else if (item.status === "fail") message = t("verifyFailed");
+    else if (item.percent !== undefined) message = t("verifyPhase", Math.round(item.percent));
+    main.append(mk(`disc-status-icon status-${item.status}`, icon), mk("disc-name", item.name), mk("disc-message", message));
+    row.appendChild(main);
+    if (item.status === "pending" && item.percent !== undefined) {
+      const track = document.createElement("div");
+      track.className = "disc-progress-track";
+      const fill = document.createElement("div");
+      fill.className = "disc-progress-fill";
+      fill.style.width = `${Math.round(item.percent)}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+    }
+    if (item.status === "fail") appendLogToggle(row, item);
+    verifyTable.appendChild(row);
+  }
+}
+
+function updateVerifyProgress() {
+  const total = verifyItems.length;
+  if (total === 0) return;
+  let done = 0;
+  for (const item of verifyItems) {
+    if (item.status !== "pending") done += 1;
+    else if (item.percent !== undefined) done += item.percent / 100;
+  }
+  verifyProgressFill.style.width = `${(done / total) * 100}%`;
+}
+
+function findVerifyItem(path) {
+  return verifyItems.find((item) => joinPath(item.folder, item.name) === path);
+}
+
+verifyAllBtn.addEventListener("click", async () => {
+  if (verifyRunning || verifyItems.length === 0) return;
+  verifyRunning = true;
+  for (const item of verifyItems) {
+    item.status = "pending";
+    delete item.percent;
+  }
+  verifySummary.style.display = "none";
+  verifyAllBtn.disabled = true;
+  verifyCancelBtn.style.display = "inline-block";
+  verifyProgressTrack.style.display = "block";
+  verifyProgressFill.style.width = "0%";
+  renderVerifyTable();
+  try {
+    await invoke("start_verify_all", { chdPaths: verifyItems.map((item) => joinPath(item.folder, item.name)) });
+  } catch (err) {
+    verifyRunning = false;
+    verifyCancelBtn.style.display = "none";
+    verifyProgressTrack.style.display = "none";
+    renderVerifyTable();
+    alert(translateError(err));
+  }
+});
+
+verifyCancelBtn.addEventListener("click", async () => {
+  await invoke("cancel_verify");
+});
+
+listen("verify-item-progress", (event) => {
+  const item = findVerifyItem(event.payload.chd_path);
+  if (item && item.status === "pending") {
+    item.percent = event.payload.percent;
+    renderVerifyTable();
+    updateVerifyProgress();
+  }
+});
+
+listen("verify-item-done", (event) => {
+  const item = findVerifyItem(event.payload.chd_path);
+  if (item) {
+    item.status = event.payload.ok ? "ok" : "fail";
+    item.log = event.payload.log ?? null;
+    delete item.percent;
+    renderVerifyTable();
+    updateVerifyProgress();
+  }
+});
+
+listen("verify-all-finished", (event) => {
+  const { ok, failed, cancelled } = event.payload;
+  verifyRunning = false;
+  verifyCancelBtn.style.display = "none";
+  verifyProgressTrack.style.display = "none";
+  for (const item of verifyItems) delete item.percent;
+  verifySummary.textContent = t(cancelled ? "verifySummaryCancelled" : "verifySummary", ok, failed);
+  verifySummary.className = failed > 0 ? "status-fail" : "status-ok";
+  verifySummary.style.display = "block";
+  renderVerifyTable();
+  if (!cancelled) notifyIfAway(t("notifyVerifyDone"), t("verifySummary", ok, failed));
+});
+
+// Dropping a folder (or any file inside one) on the window opens it, the
+// same as picking it. Ignored while converting or extracting, so a stray
+// drop can't switch folders out from under a running batch.
+function isBusy() {
+  return cancelBtn.style.display !== "none" || extractRunning || verifyRunning;
+}
+
+window.__TAURI__.webview.getCurrentWebview().onDragDropEvent(async (event) => {
+  const { type, paths } = event.payload;
+  if (type === "enter" || type === "over") {
+    document.body.classList.toggle("drag-over", !isBusy());
+    return;
+  }
+  document.body.classList.remove("drag-over");
+  if (type !== "drop" || isBusy() || !paths?.length) return;
+  const folder = await invoke("folder_for_drop", { path: paths[0] });
+  if (folder) await selectFolder(folder);
+});
+
+pickFolderBtn.addEventListener("click", async () => {
+  const selected = await open({ directory: true, multiple: false });
+  if (!selected) return;
+  await selectFolder(selected);
 });
 
 rescanBtn.addEventListener("click", async () => {
@@ -634,6 +890,7 @@ runOrganizeBtn.addEventListener("click", async () => {
   }
 
   try {
+    invalidateChdScan();
     const summary = await invoke("organize_multidisc", {
       root: currentFolder,
       destination: organizeDestination,
@@ -663,18 +920,29 @@ convertBtn.addEventListener("click", async () => {
   // feedback until the backend confirms — this gives instant feedback and
   // real per-file progress fills the bar in as chdman reports it.
   convertBtn.disabled = true;
+  // The backend reads this once when the run starts; locking it makes clear
+  // a mid-run change wouldn't apply until the next run.
+  trashOriginalsCheckbox.disabled = true;
+  savingsLabel.style.display = "none";
   convertBtn.style.display = "none";
   cancelBtn.style.display = "inline-block";
   rescanBtn.disabled = true;
   progressTrack.style.display = "block";
   progressFill.style.width = "0%";
   try {
-    await invoke("start_conversion", { root: currentFolder, formatOverrides: Array.from(formatOverrides) });
+    await invoke("start_conversion", {
+      root: currentFolder,
+      formatOverrides: Array.from(formatOverrides),
+      // Passed explicitly (not read from the saved config) so a click right
+      // after toggling can't race the checkbox's own save.
+      trashOriginals: trashOriginalsCheckbox.checked,
+    });
   } catch (err) {
     // A real failure (bad chdman path, spawn error) must not leave the UI
     // stuck in "converting" state forever — revert so the user can fix the
     // setting and retry.
     convertBtn.disabled = false;
+    trashOriginalsCheckbox.disabled = false;
     convertBtn.style.display = "inline-block";
     cancelBtn.style.display = "none";
     rescanBtn.disabled = false;
@@ -688,20 +956,22 @@ cancelBtn.addEventListener("click", async () => {
 });
 
 // Windows paths use backslashes; the backend reports the source path exactly
-// as chdman/cmd.exe see it (an absolute path like "C:\Games\GameA\Track.cue"),
+// as it handed it to chdman (an absolute path like "C:\Games\GameA\Track.cue"),
 // while a ScannedDisc only carries { name, folder, kind } from the pre-scan.
 // Match by comparing the disc's folder+name against the tail of the reported
-// path, case-insensitively and with backslashes normalized to forward
-// slashes, so drive-letter casing or slash-style differences between the
-// scan and the log don't break the match. This assumes folder+name is
-// unique per run; two identically-named discs in different folders are
-// still disambiguated correctly since the folder is part of the comparison,
-// but a disc that appears twice under the *same* folder+name (not possible
+// path with backslashes normalized to forward slashes -- and, on Windows
+// only, case-insensitively, so drive-letter casing differences between the
+// scan and the event don't break the match. Linux/macOS compare exactly,
+// since there "Game.cue" and "game.cue" can be two different files. This
+// assumes folder+name is unique per run; two identically-named discs in
+// different folders are still disambiguated correctly since the folder is
+// part of the comparison, but a disc that appears twice under the *same* folder+name (not possible
 // from a single filesystem scan) would be ambiguous.
 function matchDiscByPath(path) {
-  const normalizedPath = path.toLowerCase().replace(/\\/g, "/");
+  const fold = (s) => (platform === "windows" ? s.toLowerCase() : s);
+  const normalizedPath = fold(path).replace(/\\/g, "/");
   return discs.find((d) => {
-    const discFull = `${d.folder}/${d.name}`.toLowerCase().replace(/\\/g, "/").replace(/\/+/g, "/");
+    const discFull = fold(`${d.folder}/${d.name}`).replace(/\\/g, "/").replace(/\/+/g, "/");
     return normalizedPath === discFull || normalizedPath.endsWith(`/${discFull}`.replace(/\/+/g, "/")) || normalizedPath.endsWith(discFull);
   });
 }
@@ -718,11 +988,19 @@ listen("disc-progress", (event) => {
 });
 
 listen("disc-updated", (event) => {
-  const { status, path, message } = event.payload;
+  const { status, path, message, note, original_bytes, chd_bytes, log } = event.payload;
   const disc = matchDiscByPath(path);
   if (disc) {
     disc.status = status.toLowerCase(); // Rust enum serializes as "Ok" | "Skip" | "Fail"
-    disc.message = message;
+    const parts = [message];
+    if (original_bytes != null && chd_bytes != null) {
+      parts.push(
+        t("sizeChange", formatBytes(original_bytes), formatBytes(chd_bytes), formatPercentChange(original_bytes, chd_bytes)),
+      );
+    }
+    if (note) parts.push(t(`note${note}`));
+    disc.message = parts.join(" · ");
+    disc.log = log ?? null;
     renderTable();
     updateProgress();
     updatePendingLabel();
@@ -730,6 +1008,15 @@ listen("disc-updated", (event) => {
 });
 
 listen("run-finished", (event) => {
+  invalidateChdScan();
+  showRunSavings(event?.payload);
+  const record = event?.payload;
+  // A cancelled run was ended by the user, who's clearly at the app.
+  if (record && !record.cancelled) {
+    const summary = t("notifySummary", record.converted, record.failed);
+    const saved = savedText(record);
+    notifyIfAway(t("notifyConvertDone"), summary + saved);
+  }
   // A cancelled run leaves discs that were never reached stuck on the pending
   // "•" forever, which reads as "still working". Mark them as cancelled.
   if (event?.payload?.cancelled) {
@@ -743,6 +1030,7 @@ listen("run-finished", (event) => {
   convertBtn.style.display = "inline-block";
   // Re-enable: the click handler disabled it synchronously at run start.
   convertBtn.disabled = discs.length === 0;
+  trashOriginalsCheckbox.disabled = false;
   cancelBtn.style.display = "none";
   rescanBtn.disabled = false;
   // The fill has a permanent shimmer animation while it's visible (it reads
@@ -752,25 +1040,36 @@ listen("run-finished", (event) => {
   progressTrack.style.display = "none";
 });
 
-saveSettingsBtn.addEventListener("click", async () => {
+// Persists every Settings field at once (set_config replaces the whole
+// config), so each control that saves itself can't drop another's value.
+async function saveConfig() {
   await invoke("set_config", {
-    chdmanPath: chdmanPathInput.value,
-    autoUpdateEnabled: autoUpdateCheckbox.checked,
-    language: languageSelect.value,
+    config: {
+      chdman_path: chdmanPathInput.value,
+      auto_update_enabled: autoUpdateCheckbox.checked,
+      language: languageSelect.value,
+      parallel_conversion: parallelConversionCheckbox.checked,
+      trash_originals: trashOriginalsCheckbox.checked,
+      last_folder: currentFolder ?? "",
+    },
   });
-});
+}
+
+saveSettingsBtn.addEventListener("click", saveConfig);
 
 // Saved on its own, independent of the Guardar button: a checkbox toggle
 // that silently required a separate "Guardar" click to take effect was
 // confusing (it looked applied immediately since the checkbox visually
 // stayed checked, but the persisted config still held the old value).
-autoUpdateCheckbox.addEventListener("change", async () => {
-  await invoke("set_config", {
-    chdmanPath: chdmanPathInput.value,
-    autoUpdateEnabled: autoUpdateCheckbox.checked,
-    language: languageSelect.value,
-  });
-});
+autoUpdateCheckbox.addEventListener("change", saveConfig);
+
+// Same immediate-save treatment; read by the backend at the start of each
+// conversion run, so it applies from the next "Convertir todo" on.
+parallelConversionCheckbox.addEventListener("change", saveConfig);
+
+// Lives on the Convertir view (next to the action it affects) rather than
+// in Settings, but persists the same way.
+trashOriginalsCheckbox.addEventListener("change", saveConfig);
 
 // Also saved immediately, and re-renders every static label right away —
 // leaving stale text until the next Guardar click would be as confusing as
@@ -778,12 +1077,50 @@ autoUpdateCheckbox.addEventListener("change", async () => {
 languageSelect.addEventListener("change", async () => {
   setLanguage(languageSelect.value);
   applyTranslations();
-  await invoke("set_config", {
-    chdmanPath: chdmanPathInput.value,
-    autoUpdateEnabled: autoUpdateCheckbox.checked,
-    language: languageSelect.value,
-  });
+  await saveConfig();
 });
+
+// A desktop notification for a long batch finishing while the user is in
+// another app. Skipped when the window has focus: they can already see the
+// result, and a notification on top of it would just be noise. Permission
+// is asked the first time one is actually needed (macOS requires it).
+async function notifyIfAway(title, body) {
+  if (document.hasFocus()) return;
+  const notification = window.__TAURI__.notification;
+  if (!notification) return;
+  try {
+    let granted = await notification.isPermissionGranted();
+    if (!granted) granted = (await notification.requestPermission()) === "granted";
+    if (granted) notification.sendNotification({ title, body });
+  } catch {
+    // Notifications are a nicety; never let one break the UI.
+  }
+}
+
+// " · ahorró X" for a run record, or "" when it saved nothing.
+function savedText(record) {
+  const saved = (record.original_bytes ?? 0) - (record.chd_bytes ?? 0);
+  return record.original_bytes > 0 && saved > 0 ? ` · ${t("historySaved", formatBytes(saved))}` : "";
+}
+
+// Total space freed by the run that just finished (over the discs it
+// converted). Hidden when nothing was converted.
+function showRunSavings(record) {
+  const before = record?.original_bytes ?? 0;
+  const after = record?.chd_bytes ?? 0;
+  // Nothing converted, or (only with data that doesn't compress) the .chd
+  // files came out no smaller -- there's no saving to announce.
+  if (before <= 0 || after >= before) {
+    savingsLabel.style.display = "none";
+    return;
+  }
+  savingsLabel.textContent = t(
+    "runSavings",
+    formatBytes(before - after),
+    formatPercentChange(before, after).replace(/^[-+−]/, ""),
+  );
+  savingsLabel.style.display = "block";
+}
 
 async function renderHistory() {
   const history = await invoke("get_history");
@@ -792,7 +1129,8 @@ async function renderHistory() {
     const date = new Date(Number(run.timestamp) * 1000).toLocaleString();
     const status = run.cancelled
       ? t("cancelled")
-      : t("historySummary", { converted: run.converted, skipped: run.skipped, failed: run.failed });
+      : t("historySummary", { converted: run.converted, skipped: run.skipped, failed: run.failed }) +
+        savedText(run);
     const row = document.createElement("div");
     row.className = "history-row";
     row.append(mk("history-folder", run.folder), mk("", date), mk("", status));
@@ -914,11 +1252,21 @@ checkUpdatesBtn.addEventListener("click", async () => {
 (async () => {
   const config = await invoke("get_config");
   setLanguage(config.language);
+  platform = await invoke("get_platform");
+  setPlatform(platform);
+  if (platform !== "windows") chdmanPathInput.placeholder = "/usr/bin/chdman";
   appVersion = await window.__TAURI__.app.getVersion();
   applyTranslations();
   languageSelect.value = config.language;
   autoUpdateCheckbox.checked = config.auto_update_enabled;
+  parallelConversionCheckbox.checked = config.parallel_conversion;
+  trashOriginalsCheckbox.checked = config.trash_originals;
   chdmanPathInput.value = config.chdman_path;
   updateOrganizeAvailability();
   updateMoveChdAvailability();
+  // Reopen the folder from last time, unless it's gone (unplugged drive,
+  // renamed, deleted) -- then just start empty, as on a first launch.
+  if (config.last_folder && (await invoke("folder_exists", { path: config.last_folder }))) {
+    await selectFolder(config.last_folder);
+  }
 })();
