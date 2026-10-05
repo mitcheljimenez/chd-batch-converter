@@ -66,8 +66,3 @@ which `releases/latest` (and therefore the updater) ignores. Use one to
 check that every platform's assets and all four `latest.json` entries
 show up before cutting the real version. Delete the prerelease and its
 tag afterwards.
-
-A release can also be started by hand from Actions → Release → Run
-workflow, picking the branch to build and typing the tag (e.g.
-`v0.2.0-rc1`): `tauri-action` creates that tag on the built commit, so
-a test build doesn't need the branch merged or a tag pushed first.
