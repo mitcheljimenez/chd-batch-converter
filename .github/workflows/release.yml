@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - "v*"
+  # Manual runs name the tag to publish; tauri-action creates it on the
+  # commit being built when it doesn't exist yet.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v0.2.0-rc1"
+        required: true
 
 jobs:
   release:
@@ -29,6 +36,8 @@ jobs:
             rust-targets: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
     runs-on: ${{ matrix.platform }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     permissions:
       contents: write
     steps:
@@ -73,10 +82,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: ui
-          tagName: ${{ github.ref_name }}
-          releaseName: "CHD Converter ${{ github.ref_name }}"
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "CHD Converter ${{ env.RELEASE_TAG }}"
           releaseDraft: false
           # Tags like v0.2.0-rc1 publish as a prerelease, so they never
           # become releases/latest (which the updater reads).
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           args: ${{ matrix.args }}
